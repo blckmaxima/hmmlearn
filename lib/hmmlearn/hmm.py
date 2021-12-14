@@ -28,8 +28,8 @@ def _check_and_set_gaussian_n_features(model, X):
     if hasattr(model, "n_features"):
         if model.n_features != n_features:
             raise ValueError(
-                f"Unexpected number of dimensions, got {n_features} but "
-                f"expected {model.n_features}")
+                "Unexpected number of dimensions, got {} but expected {}"
+                .format(n_features, model.n_features))
     else:
         model.n_features = n_features
 
@@ -216,8 +216,8 @@ class GaussianHMM(_BaseHMM):
         self.n_features = self.means_.shape[1]
 
         if self.covariance_type not in COVARIANCE_TYPES:
-            raise ValueError(
-                f"covariance_type must be one of {COVARIANCE_TYPES}")
+            raise ValueError('covariance_type must be one of {}'
+                             .format(COVARIANCE_TYPES))
 
     def _compute_log_likelihood(self, X):
         return log_multivariate_normal_density(
@@ -500,8 +500,8 @@ class MultinomialHMM(_BaseHMM):
         if hasattr(self, "n_features"):
             if self.n_features - 1 < X.max():
                 raise ValueError(
-                    f"Largest symbol is {X.max()} but the model only emits "
-                    f"symbols up to {self.n_features - 1}")
+                    "Largest symbol is {} but the model only emits symbols up "
+                    "to {}".format(X.max(), self.n_features - 1))
         else:
             self.n_features = X.max() + 1
 
@@ -724,7 +724,7 @@ class GMMHMM(_BaseHMM):
             if self.covars_prior is None:
                 self.covars_prior = 0.0
             if self.covars_weight is None:
-                self.covars_weight = -(1.0 + self.n_features + 1.0)
+                self.covars_weight = self.n_features + 1
         elif self.covariance_type == "tied":
             if self.covars_prior is None:
                 self.covars_prior = 0.0
@@ -732,12 +732,12 @@ class GMMHMM(_BaseHMM):
                 self.covars_weight = -(self.n_mix + self.n_features + 1.0)
         elif self.covariance_type == "diag":
             if self.covars_prior is None:
-                self.covars_prior = -1.5
+                self.covars_prior = 0.0
             if self.covars_weight is None:
                 self.covars_weight = 0.0
         elif self.covariance_type == "spherical":
             if self.covars_prior is None:
-                self.covars_prior = -(self.n_mix + 2.0) / 2.0
+                self.covars_prior = 0
             if self.covars_weight is None:
                 self.covars_weight = 0.0
 
@@ -772,7 +772,7 @@ class GMMHMM(_BaseHMM):
                 self.covars_weight, (nc, nm, nf)).copy()
         elif self.covariance_type == "spherical":
             self.covars_prior = np.broadcast_to(
-                self.covars_prior, (nc, nm)).copy()
+                self.covars_prior, (nc, nm, nf)).copy()
             self.covars_weight = np.broadcast_to(
                 self.covars_weight, (nc, nm)).copy()
 
@@ -789,8 +789,8 @@ class GMMHMM(_BaseHMM):
 
         # Checking covariance type
         if self.covariance_type not in COVARIANCE_TYPES:
-            raise ValueError(
-                f"covariance_type must be one of {COVARIANCE_TYPES}")
+            raise ValueError("covariance_type must be one of {}"
+                             .format(COVARIANCE_TYPES))
 
         self.weights_ = np.array(self.weights_)
         # Checking mixture weights' shape
@@ -828,19 +828,19 @@ class GMMHMM(_BaseHMM):
         if (self.covariance_type == "spherical" or
                 self.covariance_type == "diag"):
             if np.any(self.covars_ < 0):
-                raise ValueError(f"{self.covariance_type!r} mixture covars "
-                                 f"must be non-negative")
+                raise ValueError("{!r} mixture covars must be non-negative"
+                                 .format(self.covariance_type))
             if np.any(self.covars_ == 0):
                 _log.warning("Degenerate mixture covariance")
         elif self.covariance_type == "tied":
             for i, covar in enumerate(self.covars_):
                 if not np.allclose(covar, covar.T):
-                    raise ValueError(
-                        f"Covariance of state #{i} is not symmetric")
+                    raise ValueError("Covariance of state #{} is not symmetric"
+                                     .format(i))
                 min_eigvalsh = linalg.eigvalsh(covar).min()
                 if min_eigvalsh < 0:
-                    raise ValueError(
-                        f"Covariance of state #{i} is not positive definite")
+                    raise ValueError("Covariance of state #{} is not positive "
+                                     "definite".format(i))
                 if min_eigvalsh == 0:
                     _log.warning("Covariance of state #%d has a null "
                                  "eigenvalue.", i)
@@ -849,13 +849,13 @@ class GMMHMM(_BaseHMM):
                 for j, covar in enumerate(mix_covars):
                     if not np.allclose(covar, covar.T):
                         raise ValueError(
-                            f"Covariance of state #{i}, mixture #{j} is not "
-                            f"symmetric")
+                            "Covariance of state #{}, mixture #{} is not "
+                            "symmetric".format(i, j))
                     min_eigvalsh = linalg.eigvalsh(covar).min()
                     if min_eigvalsh < 0:
                         raise ValueError(
-                            f"Covariance of state #{i}, mixture #{j} is not "
-                            f"positive definite")
+                            "Covariance of state #{}, mixture #{} is not "
+                            "positive definite".format(i, j))
                     if min_eigvalsh == 0:
                         _log.warning("Covariance of state #%d, mixture #%d "
                                      "has a null eigenvalue.", i, j)
@@ -903,37 +903,22 @@ class GMMHMM(_BaseHMM):
 
     def _initialize_sufficient_statistics(self):
         stats = super()._initialize_sufficient_statistics()
-        stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
-        stats['post_sum'] = np.zeros(self.n_components)
+        nc = self.n_components
+        nm = self.n_mix
+        nf = self.n_features
+        stats['n_samples'] = 0
+        stats['post_mix_sum'] = np.zeros((nc, nm))
+        stats['post_sum'] = np.zeros(nc)
+        # Used in reestimation of the Mean
+        stats['obs'] = np.zeros((nc, nm, nf))
+        # Used in reestimation of the covariance
+        if self.covariance_type == "full":
+            stats['obs*obs.T'] = np.zeros((nc, nm, nf, nf))
+        elif self.covariance_type in ("diag", "spherical"):
+            stats['obs*obs.T'] = np.zeros((nc, nm, nf))
+        elif self.covariance_type == "tied":
+            stats['obs*obs.T'] = np.zeros((nc, nf, nf))
 
-        # The following statistics are stored in lists so we can
-        # accumulate chunks of data for multiple sequences (aka
-        # multiple frames) during fitting. The fit(X, lengths) method
-        # in the _BaseHMM class will call
-        # _accumulate_sufficient_statistics once per sequence in the
-        # training samples. Data from all sequences needs to be
-        # accumulated and fed into _do_mstep.
-        #
-        # Suppose fit(X, lengths) is called with M>=1 sequences, where
-        # each sequence s=0, ..., M-1 contains L[s] = lengths[s]
-        # ordered samples. Then after M calls to
-        # _accumulate_sufficient_statistics, one per sequence, we
-        # expect each list statistic to contain M items, all arrays,
-        # with the following shapes:
-        #
-        # stat              shape of s-th item
-        #
-        # post_comp_mix     (L[s], n_components, n_mix)
-        # samples           (L[s], n_features)
-        # centred           (L[s], n_components, n_mix, n_features)
-        #
-        # FIXME this encoding requires memory proportional to the
-        # number of samples. It would be preferable to rework the
-        # calculations in _do_mstep to reduce over the samples axis
-        # earlier during _accumulate_sufficient_statistics in order to
-        # make memory consumption independent of the number of samples.
-        stats['post_comp_mix'] = []
-        stats['samples'] = []
         return stats
 
     def _accumulate_sufficient_statistics(self, stats, X, lattice,
@@ -942,54 +927,78 @@ class GMMHMM(_BaseHMM):
             stats, X, lattice, post_comp, fwdlattice, bwdlattice
         )
 
+        # Re-estimation based upon:
+        # Watanabe, S., & Chien, J. (2015). Bayesian Speech and Language
+        # Processing. Cambridge: Cambridge University Press.
+        # doi:10.1017/CBO9781107295360
+
         n_samples, _ = X.shape
 
-        stats['samples'].append(X)
+        stats['n_samples'] += n_samples
 
-        post_mix = np.zeros((n_samples, self.n_components, self.n_mix))
+        # (T, N, n)
+        post_mix = np.zeros((n_samples, self.n_mix))
         for p in range(self.n_components):
+            # normalized the per component densities
             log_denses = self._compute_log_weighted_gaussian_densities(X, p)
             log_normalize(log_denses, axis=-1)
+
             with np.errstate(under="ignore"):
-                post_mix[:, p, :] = np.exp(log_denses)
+                post_mix[:, :] = np.einsum("i,ij->ij", post_comp[:, p],
+                                           np.exp(log_denses))
+            # Weighted number of samples that were in each hidden
+            # state and mixture component
+            stats['post_mix_sum'][p, :] += post_mix.sum(axis=0)
 
-        with np.errstate(under="ignore"):
-            post_comp_mix = post_comp[:, :, None] * post_mix
-        stats['post_comp_mix'].append(post_comp_mix)
+            # Means weighted by number of samples that were in
+            # each hidden state and mixture component
+            stats['obs'][p, :, :] += np.einsum("ij,ik->jk", post_mix, X)
 
-        stats['post_mix_sum'] += post_comp_mix.sum(axis=0)
+            # weighted X * X^T
+            outer = X[..., :, None] * X[..., None, :]
+            if self.covariance_type == "full":
+                # Weighted Outer Prodect For Covariance
+                stats['obs*obs.T'][p, :, :, :] += np.einsum("ij,ikl->jkl",
+                                                            post_mix, outer)
+            elif self.covariance_type in ("diag", "spherical"):
+                diag = np.diagonal(outer, axis1=-2, axis2=-1)
+                stats['obs*obs.T'][p, :, :] += np.einsum("ij,ik->jk", post_mix,
+                                                         diag)
+            elif self.covariance_type == "tied":
+                # Ignore the mixture
+                stats['obs*obs.T'][p, :, :] += np.einsum("ij,ikl->kl",
+                                                         post_mix, outer)
+
         stats['post_sum'] += post_comp.sum(axis=0)
 
     def _do_mstep(self, stats):
         super()._do_mstep(stats)
+        lambdas, mus = self.means_weight, self.means_prior
+        cp = self.covars_prior
+        cw = self.covars_weight
         nf = self.n_features
-        nm = self.n_mix
 
         # Maximizing weights
         if 'w' in self.params:
             alphas_minus_one = self.weights_prior - 1
             w_n = stats['post_mix_sum'] + alphas_minus_one
-            w_d = (stats['post_sum'] + alphas_minus_one.sum(axis=1))[:, None]
+            w_d = (stats['post_mix_sum'].sum(1) +
+                   alphas_minus_one.sum(axis=1))[:, None]
             self.weights_ = w_n / w_d
 
         means_before_update = self.means_.copy()
 
         # Maximizing means
         if 'm' in self.params:
-            lambdas, mus = self.means_weight, self.means_prior
-            m_n = lambdas[:, :, None] * mus
-            for post_comp_mix, samples in zip(stats['post_comp_mix'],
-                                              stats['samples']):
-                m_n += np.einsum('ijk,il->jkl', post_comp_mix, samples)
-
-            m_d = stats['post_mix_sum'] + lambdas
+            m_n = stats['obs'] + lambdas[:, :, None] * mus
+            m_d = (stats['post_mix_sum'] + lambdas)[:, :, None]
             # If a componenent has zero weight, then replace nan (0/0?) means
             # by 0 (0/1).  The actual value is irrelevant as the component will
             # be unused.  This needs to be done before maximizing covariances
             # as nans would otherwise propagate to other components if
             # covariances are tied.
-            m_d[(self.weights_ == 0) & (m_n == 0).all(axis=-1)] = 1
-            self.means_ = m_n / m_d[:, :, None]
+            # m_d[(self.weights_ == 0) & (m_n == 0).all(axis=-1)] = 1
+            self.means_ = m_n / m_d
 
         # Maximizing covariances.
         # Iterate over 'post_comp_mix' and 'samples' in memory-efficient way
@@ -998,76 +1007,42 @@ class GMMHMM(_BaseHMM):
         # Though for a large number of small chunks, it'd make sense to
         # flatten all small chunks in one array.
         if 'c' in self.params:
-            lambdas, mus = self.means_weight, self.means_prior
-            centered_means = self.means_ - mus
-
-            def outer_f(x):  # Outer product over features.
-                return x[..., :, None] * x[..., None, :]
 
             if self.covariance_type == 'full':
-                centered_means_dots = outer_f(centered_means)
+                psis_t = np.transpose(cp, axes=(0, 1, 3, 2))
 
-                psis_t = np.transpose(self.covars_prior, axes=(0, 1, 3, 2))
-                nus = self.covars_weight
-
-                c_n = psis_t + lambdas[:, :, None, None] * centered_means_dots
-                for post_comp_mix, samples in zip(stats['post_comp_mix'],
-                                                  stats['samples']):
-                    centered = samples[:, None, None, :] - means_before_update
-                    centered_dots = outer_f(centered)
-                    c_n += np.einsum('ijk,ijklm->jklm', post_comp_mix,
-                                     centered_dots)
                 c_d = (
-                    stats['post_mix_sum'] + 1 + nus + nf + 1
+                    # This is the divisor from the literature
+                    stats['post_mix_sum'] + cw - nf - 1
                 )[:, :, None, None]
 
-            elif self.covariance_type == 'diag':
-                alphas = self.covars_prior
-                betas = self.covars_weight
-                centered_means2 = centered_means ** 2
+                means_prod = np.einsum("ijk,ijl,ij->ijkl", self.means_,
+                                       self.means_, stats['post_mix_sum'])
+                means_prior = np.einsum("ij,ijk,ijl->ijkl", lambdas, mus, mus)
+                c_n = stats['obs*obs.T'] + psis_t + means_prior - means_prod
+            elif self.covariance_type in ('diag', "spherical"):
 
-                c_n = lambdas[:, :, None] * centered_means2 + 2 * betas
-                for post_comp_mix, samples in zip(stats['post_comp_mix'],
-                                                  stats['samples']):
-                    centered = samples[:, None, None, :] - means_before_update
-                    centered2 = np.square(centered, out=centered)  # reuse
-                    c_n += np.einsum('ijk,ijkl->jkl', post_comp_mix, centered2)
+                means_prod = np.einsum("ij,ijk,ijk->ijk", stats['post_mix_sum'],
+                                       self.means_, self.means_)
+                means_prior = np.einsum("ij,ijk,ijk->ijk", lambdas, mus, mus)
 
-                c_d = stats['post_mix_sum'][:, :, None] + 1 + 2 * (alphas + 1)
-
-            elif self.covariance_type == 'spherical':
-                # Much faster than (x**2).sum(-1).
-                def norm_last(x): return np.einsum('...i,...i', x, x)
-                centered_means_norm2 = norm_last(centered_means)
-
-                alphas = self.covars_prior
-                betas = self.covars_weight
-
-                c_n = lambdas * centered_means_norm2 + 2 * betas
-                for post_comp_mix, samples in zip(stats['post_comp_mix'],
-                                                  stats['samples']):
-                    centered = samples[:, None, None, :] - means_before_update
-                    centered_norm = norm_last(centered)
-                    c_n += np.einsum('ijk,ijk->jk', post_comp_mix,
-                                     centered_norm)
-
-                c_d = nf * (stats['post_mix_sum'] + 1) + 2 * (alphas + 1)
+                c_n = stats['obs*obs.T'] + cp + means_prior - means_prod
+                if self.covariance_type == "spherical":
+                    c_n = c_n.mean(axis=-1)
+                    c_d = stats['post_mix_sum'] + cw - 2
+                else:
+                    c_d = stats['post_mix_sum'][:, :, None] + \
+                            cw - 2
 
             elif self.covariance_type == 'tied':
-                centered_means_dots = outer_f(centered_means)
+                psis_t = np.transpose(cp, axes=(0, 2, 1))
+                c_d = (
+                    stats['post_mix_sum'].sum(axis=1) + cw - nf - 1
+                )[:, None, None]
 
-                psis_t = np.transpose(self.covars_prior, axes=(0, 2, 1))
-                nus = self.covars_weight
-
-                c_n = np.einsum('ij,ijkl->ikl', lambdas, centered_means_dots) \
-                      + psis_t
-                for post_comp_mix, samples in zip(stats['post_comp_mix'],
-                                                  stats['samples']):
-                    centered = samples[:, None, None, :] - means_before_update
-                    centered_dots = outer_f(centered)
-                    c_n += np.einsum('ijk,ijklm->jlm', post_comp_mix,
-                                     centered_dots)
-
-                c_d = (stats['post_sum'] + nm + nus + nf + 1)[:, None, None]
+                c_n = stats['obs*obs.T'] + psis_t
+                c_n -= np.einsum("ij,ijk,ijl->ikl", stats['post_mix_sum'],
+                                 self.means_, self.means_)
+                c_n += np.einsum("ij,ijk,ijl->ikl", lambdas, mus, mus)
 
             self.covars_ = c_n / c_d
