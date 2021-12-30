@@ -1022,17 +1022,17 @@ class GMMHMM(_BaseHMM):
                 c_n = stats['obs*obs.T'] + psis_t + means_prior - means_prod
             elif self.covariance_type in ('diag', "spherical"):
 
-                means_prod = np.einsum("ij,ijk,ijk->ijk", stats['post_mix_sum'],
+                means_prod = np.einsum("ij,ijk,ijk->ijk",
+                                       stats['post_mix_sum'],
                                        self.means_, self.means_)
                 means_prior = np.einsum("ij,ijk,ijk->ijk", lambdas, mus, mus)
 
                 c_n = stats['obs*obs.T'] + cp + means_prior - means_prod
                 if self.covariance_type == "spherical":
                     c_n = c_n.mean(axis=-1)
-                    c_d = stats['post_mix_sum'] + cw - 2
+                    c_d = stats['post_mix_sum'] + cw
                 else:
-                    c_d = stats['post_mix_sum'][:, :, None] + \
-                            cw - 2
+                    c_d = stats['post_mix_sum'][:, :, None] + cw
 
             elif self.covariance_type == 'tied':
                 psis_t = np.transpose(cp, axes=(0, 2, 1))

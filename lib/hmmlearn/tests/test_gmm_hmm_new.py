@@ -202,7 +202,9 @@ class TestGMMHMMWithFullCovars(GMMHMMTestMixin):
 
 class TestGMMHMM_KmeansInit:
     @pytest.mark.parametrize("implementation", ["scaling", "log"])
-    def test_kmeans(self, implementation):
+    @pytest.mark.parametrize("covariance_type",
+                             ["spherical", "diag", "tied", "full"])
+    def test_kmeans(self, implementation, covariance_type):
         # Generate two isolated cluster.
         # The second cluster has no. of points less than n_mix.
         np.random.seed(0)
@@ -210,6 +212,7 @@ class TestGMMHMM_KmeansInit:
         data2 = np.random.uniform(low=5, high=6, size=(5, 2))
         data = np.r_[data1, data2]
         model = GMMHMM(n_components=2, n_mix=10, n_iter=5,
+                       covariance_type=covariance_type,
                        implementation=implementation)
         model.fit(data)  # _init() should not fail here
         # test whether the means are bounded by the data lower- and upperbounds
