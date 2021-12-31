@@ -729,7 +729,7 @@ class GMMHMM(_BaseHMM):
             if self.covars_prior is None:
                 self.covars_prior = 0.0
             if self.covars_weight is None:
-                self.covars_weight = -(self.n_mix + self.n_features + 1.0)
+                self.covars_weight = 0
         elif self.covariance_type == "diag":
             if self.covars_prior is None:
                 self.covars_prior = 0.0
@@ -1037,12 +1037,11 @@ class GMMHMM(_BaseHMM):
             elif self.covariance_type == 'tied':
                 psis_t = np.transpose(cp, axes=(0, 2, 1))
                 c_d = (
-                    stats['post_mix_sum'].sum(axis=1) + cw - nf - 1
+                    stats['post_mix_sum'].sum(axis=1) + cw
                 )[:, None, None]
 
                 c_n = stats['obs*obs.T'] + psis_t
                 c_n -= np.einsum("ij,ijk,ijl->ikl", stats['post_mix_sum'],
                                  self.means_, self.means_)
                 c_n += np.einsum("ij,ijk,ijl->ikl", lambdas, mus, mus)
-
             self.covars_ = c_n / c_d
