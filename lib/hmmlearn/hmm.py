@@ -997,15 +997,10 @@ class GMMHMM(_BaseHMM):
             # be unused.  This needs to be done before maximizing covariances
             # as nans would otherwise propagate to other components if
             # covariances are tied.
-            # m_d[(self.weights_ == 0) & (m_n == 0).all(axis=-1)] = 1
+            m_d[(self.weights_ == 0) & (m_n == 0).all(axis=-1)] = 1
             self.means_ = m_n / m_d
 
         # Maximizing covariances.
-        # Iterate over 'post_comp_mix' and 'samples' in memory-efficient way
-        # and accumulate the statistics. In other words, the sequence of
-        # matrices (chunks) are not flattened in one large matrix.
-        # Though for a large number of small chunks, it'd make sense to
-        # flatten all small chunks in one array.
         if 'c' in self.params:
 
             if self.covariance_type == 'full':
@@ -1015,7 +1010,6 @@ class GMMHMM(_BaseHMM):
                     # This is the divisor from the literature
                     stats['post_mix_sum'] + cw - nf - 1
                 )[:, :, None, None]
-
                 means_prod = np.einsum("ijk,ijl,ij->ijkl", self.means_,
                                        self.means_, stats['post_mix_sum'])
                 means_prior = np.einsum("ij,ijk,ijl->ijkl", lambdas, mus, mus)

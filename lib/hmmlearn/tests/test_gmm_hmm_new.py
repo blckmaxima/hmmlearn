@@ -236,12 +236,11 @@ class TestGMMHMM_MultiSequence:
                         random_state=1)
         model1.fit(data)
         model2.fit(data, lengths=[200] * 5)
-
         assert_array_almost_equal(model1.means_, model2.means_,
                                   decimal=2)
         assert_array_almost_equal(model1.covars_, model2.covars_,
-                                  decimal=3)
+                                  decimal=2)
         assert_array_almost_equal(model1.weights_, model2.weights_,
-                                  decimal=3)
+                                  decimal=2)
         assert_array_almost_equal(model1.transmat_, model2.transmat_,
                                   decimal=2)
