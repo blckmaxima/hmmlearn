@@ -375,7 +375,7 @@ class GaussianHMM(_emissions.BaseGaussianHMM, BaseHMM):
                                      (cvweight + stats['post'][:, None, None]))
 
 
-class GMMHMM(_emissions.BaseGMMHMM):
+class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
     """
     Hidden Markov Model with Gaussian mixture emissions.
 

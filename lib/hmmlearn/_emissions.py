@@ -181,7 +181,7 @@ class BaseGaussianHMM(_AbstractHMM):
         )
 
 
-class BaseGMMHMM(BaseHMM):
+class BaseGMMHMM(_AbstractHMM):
 
     def _get_n_fit_scalars_per_param(self):
         nc = self.n_components
