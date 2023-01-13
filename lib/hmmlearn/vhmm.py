@@ -226,13 +226,12 @@ class VariationalCategoricalHMM(BaseCategoricalHMM, VariationalBaseHMM):
 
 class VariationalGaussianHMM(BaseGaussianHMM, VariationalBaseHMM):
     """
-    Hidden Markov Model with Multivariate Gaussian Emissions trained
+    Hidden Markov Model with Gaussian Mixture Model Emissions trained
     using Variational Inference.
 
     References:
-        * https://arxiv.org/abs/1605.08618
-        * https://core.ac.uk/reader/10883750
-        * https://theses.gla.ac.uk/6941/7/2005McGroryPhD.pdf
+        * https://titan.cs.gsu.edu/~sji/papers/AL_TPAMI.pdf
+        * TODO: The speech processing book
 
     Attributes
     ----------
@@ -942,7 +941,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
     VariationalGaussianHMM(algorithm='viterbi',...
     """
 
-    def __init__(self, n_components=1, covariance_type="full",
+    def __init__(self, n_components=1, n_mix=1, covariance_type="full",
                  startprob_prior=None, transmat_prior=None,
                  weights_prior=None, means_prior=None,
                  beta_prior=None, dof_prior=None,
@@ -1042,6 +1041,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             implementation=implementation
         )
         self.n_mix = n_mix
+        self.weights_prior = weights_prior
         self.covariance_type = covariance_type
         self.means_prior = means_prior
         self.beta_prior = beta_prior
@@ -1093,8 +1093,8 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
         # Default values for covariance prior parameters
         # Kmeans will be used for initializing both the means
         # and the covariances
-        self._init_covar_priors()
-        self._fix_priors_shape()
+        # self._init_covar_priors()
+        # self._fix_priors_shape()
 
         X_mean = X.mean(axis=0)
         main_kmeans = cluster.KMeans(n_clusters=nc,
@@ -1111,7 +1111,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             if X_cluster.shape[0] >= nm:
                 kmeans.fit(X_cluster)
                 means.append(kmeans.cluster_centers_)
-                cluster_counts = [X_cluster.shape[0] / nm] * nm
+                cluster_counts.append([X_cluster.shape[0] / nm] * nm)
             else:
                 if cv is None:
                     cv = compute_cv()
@@ -1119,11 +1119,11 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
                                                           cov=cv,
                                                           size=nm)
                 means.append(m_cluster)
-                cluster_counts = [1] * nm
+                cluster_counts.append([1] * nm)
 
 
-        if self._needs_init("w", "weights_prior_")
-        or self._needs_init("w", "weights_posterior_"):
+        if (self._needs_init("w", "weights_prior_") or
+            self._needs_init("w", "weights_posterior_")):
             if self.weights_prior is None:
                 self.weights_prior_ = np.full(
                     (nc, nm), 1. / nm
@@ -1145,12 +1145,14 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             self.means_posterior_ = np.stack(means)
 
             if self.beta_prior is None:
-                self.beta_prior_ = np.zeros(nc) + 1
+                self.beta_prior_ = np.zeros((nc, nm)) + 1
             else:
                 self.beta_prior_ = self.beta_prior
 
             # Count of items in each mixture components
             self.beta_posterior_ = np.stack(cluster_counts)
+            print(nc, nm, nf)
+            print(self.beta_posterior_)
 
         if (self._needs_init("c", "dof_prior_")
                 or self._needs_init("c", "dof_posterior_")
@@ -1175,9 +1177,9 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             # We store and update both W_k and scale_posterior_,
             # as they each are used in the EM-like algorithm
             cv = np.cov(X.T) + 1E-3 * np.eye(X.shape[1])
-            self.covars_ = \
-                _utils.distribute_covar_matrix_to_match_covariance_type(
-                    cv, self.covariance_type, nc).copy()
+            #self.covars_ = \
+            #    _utils.distribute_covar_matrix_to_match_covariance_type(
+            #        cv, self.covariance_type, nc).copy()
 
             if self.covariance_type == "full":
                 if self.scale_prior is None:
@@ -1187,9 +1189,11 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
                     )
                 else:
                     self.scale_prior_ = self.scale_prior
+                self.covars_ = np.zeros((nc, nm, nf, nf))
+                self.covars_[:] = cv
                 self.scale_posterior_ = (
-                    self._covars_
-                    * np.asarray(self.dof_posterior_)[:, None, None])
+                    self.covars_
+                    * np.asarray(self.dof_posterior_)[:,:, None, None])
 
             elif self.covariance_type == "tied":
                 if self.scale_prior is None:
@@ -1249,38 +1253,44 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
         if self.covariance_type not in COVARIANCE_TYPES:
             raise ValueError(
                 f"{self.covariance_type} is invalid")
+        if not hasattr(self, "n_features"):
+            self.n_features = self.means_.shape[2]
 
-        means_shape = (self.n_components, self.n_features)
+        nc = self.n_components
+        nf = self.n_features
+        nm = self.n_mix
+
+        means_shape = (nc, nm, nf)
 
         self.means_prior_ = np.asarray(self.means_prior_, dtype=float)
         self.means_posterior_ = np.asarray(self.means_posterior_, dtype=float)
         if self.means_prior_.shape != means_shape:
             raise ValueError(
-                "means_prior_ have shape (n_components, n_features)")
+                "means_prior_ have shape (n_components, n_mix, n_features)")
         if self.means_posterior_.shape != means_shape:
             raise ValueError(
-                "means_posterior_ must have shape (n_components, n_features)")
+                "means_posterior_ must have shape (n_components, n_mix, n_features)")
 
         self.beta_prior_ = np.asarray(self.beta_prior_, dtype=float)
         self.beta_posterior_ = np.asarray(self.beta_posterior_, dtype=float)
-        if self.beta_prior_.shape != (self.n_components,):
+        if self.beta_prior_.shape != (nc, nm):
             raise ValueError(
-                "beta_prior_ have shape (n_components,)")
+                "beta_prior_ have shape (n_components, n_mix)")
 
-        if self.beta_posterior_.shape != (self.n_components,):
+        if self.beta_posterior_.shape != (nc, nm,):
             raise ValueError(
-                "beta_posterior_ must have shape (n_components,)")
+                "beta_posterior_ must have shape (n_components, n_mix)")
 
         if self.covariance_type in ("full", "diag", "spherical"):
             self.dof_prior_ = np.asarray(self.dof_prior_, dtype=float)
             self.dof_posterior_ = np.asarray(self.dof_posterior_, dtype=float)
-            if self.dof_prior_.shape != (self.n_components,):
+            if self.dof_prior_.shape != (nc, nf):
                 raise ValueError(
-                    "dof_prior_ have shape (n_components,)")
+                    "dof_prior_ have shape (n_components, n_mix)")
 
-            if self.dof_posterior_.shape != (self.n_components,):
+            if self.dof_posterior_.shape != (nc, nf):
                 raise ValueError(
-                    "dof_posterior_ must have shape (n_components,)")
+                    "dof_posterior_ must have shape (n_components, n_mix)")
 
         elif self.covariance_type == "tied":
             if not isinstance(self.dof_prior_, numbers.Number):
@@ -1293,7 +1303,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
 
         expected = None
         if self.covariance_type == "full":
-            expected = (self.n_components, self.n_features, self.n_features)
+            expected = (nc, nm, nf, nf)
         elif self.covariance_type == "tied":
             expected = (self.n_features, self.n_features)
         elif self.covariance_type == "diag":
