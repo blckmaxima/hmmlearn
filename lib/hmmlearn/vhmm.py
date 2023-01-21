@@ -1396,6 +1396,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         # j/k are n_Features
         if "w" in self.params:
             self.weights_posterior_ = self.weights_prior_ + stats['post_mix_sum']
+            # For compat
             self.weights_ = self.weights_posterior_/self.weights_posterior_.sum(axis=1)[:, None]
 
         if "m" in self.params:
@@ -1403,9 +1404,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             self.means_posterior_ = np.einsum("cm,cmj->cmj", self.beta_prior_,
                                               self.means_prior_)
             self.means_posterior_ += stats['obs']
-            for c in range(self.n_components):
-                for m in range(self.n_mix):
-                    self.means_posterior_[c, m]= self.means_posterior_[c,m]/ self.beta_posterior_[c, m]
+            self.means_posterior_ = self.means_posterior_/self.beta_posterior_[:, :, None]
+            # For Compat
             self.means_ = self.means_posterior_
 
         if "c" in self.params:
@@ -1424,11 +1424,9 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                                 self.beta_posterior_,
                                 self.means_posterior_,
                                 self.means_posterior_))
-                #assert np.all(self.scale_posterior_ >= 0), self.scale_posterior_
-                for c in range(self.n_components):
-                    for m in range(self.n_mix):
-                        self.covars_[c, m] = (self.scale_posterior_[c,m]
-                                        / self.dof_posterior_[c,m])
+                # For compat
+                self.covars_ = (self.scale_posterior_
+                                / self.dof_posterior_[:, :, None, None])
             elif self.covariance_type == "tied":
                 raise NotImplementedError("oops")
             elif self.covariance_type == "diag":
