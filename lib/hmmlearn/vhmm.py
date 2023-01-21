@@ -1319,10 +1319,6 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                              f"found {self.scale_posterior_.shape}")
 
     def _compute_subnorm_log_likelihood(self, X):
-        # Refer to the Gruhl/Sick paper for the notation
-        # In general, things are neater if we pretend the covariance is
-        # full / tied.  Or, we could treat each case separately, and reduce
-        # the number of operations. That's left for the future :-)
         lll = np.zeros((X.shape[0], self.n_components), dtype=float)
         for comp in range(self.n_components):
             lll[:, comp] = special.logsumexp(self._subnorm_for_one_component(X, comp), axis=1)
@@ -1341,38 +1337,36 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         scale_posterior_ = self.scale_posterior_[component]
         if self.covariance_type != "full":
             assert False
+
         W_k = np.linalg.inv(scale_posterior_)
+        assert not np.any(np.isnan(W_k))
         term1 += self.n_features * np.log(2) + _utils.logdet(W_k)
         term1 /= 2
 
         # We ignore the constant that is typically excluded in the literature
-        # term2 = self.n_features * log(2 * M_PI) / 2
+        term2 = 0
         term3 = self.n_features / self.beta_posterior_[component]
 
         # (X - Means) * W_k * (X-Means)^T * self.dof_posterior_
-        last_term = np.zeros((X.shape[0], self.n_mix), dtype=float)
-        for mix in range(self.n_mix):
-            # shape becomes (nc, n_samples,
-            delta = (X - self.means_posterior_[component, mix])
-            # i is the length of the sequence X
-            # j, k are the n_features
-            # output shape is length
-            if self.covariance_type in ("full", "diag", "spherical"):
-                dots = np.einsum("ij,jk,ik,->i",
-                                 delta, W_k[mix], delta, self.dof_posterior_[component, mix])
-            elif self.covariance_type == "tied":
-                dots = np.einsum("ij,jk,ik,->i",
-                                 delta, W_k[mix], delta, self.dof_posterior_[component, mix])
-            last_term[:, mix] += .5 * (dots + term3[mix])
-        return mixture_weights + term1 - last_term
+        # shape becomes (nc, n_samples,
+        delta = (X - self.means_posterior_[component][:, None])
+        # i is the length of the sequence X
+        # j is the components
+        # k, l are the n_features
+        if self.covariance_type in ("full", "diag", "spherical"):
+           dots = np.einsum("jik,jkl,jil,j->ij",
+                                 delta, W_k, delta, self.dof_posterior_[component])
+        else:
+            assert False
+        last_term = .5 * (dots + term3)
+        return mixture_weights + term1 - term2 - last_term
 
     def _initialize_sufficient_statistics(self):
         stats = super()._initialize_sufficient_statistics()
         stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
-        stats['post_sum'] = np.zeros(self.n_components)
 
         if 'm' in self.params:
-            stats['m_n'] = np.zeros_like(self.means_posterior_)
+            stats['obs'] = np.zeros_like(self.means_posterior_)
         if 'c' in self.params:
             stats['obs*obs.T'] = np.zeros_like(self.scale_posterior_)
 
@@ -1395,19 +1389,24 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             Sufficient statistics updated from all available samples.
         """
         super()._do_mstep(stats)
+
+        # c is number of components
+        # m is number of mix
+        # i is length of X
+        # j/k are n_Features
         if "w" in self.params:
             self.weights_posterior_ = self.weights_prior_ + stats['post_mix_sum']
+            self.weights_ = self.weights_posterior_/self.weights_posterior_.sum(axis=1)[:, None]
 
         if "m" in self.params:
             self.beta_posterior_ = self.beta_prior_ + stats['post_mix_sum']
-            m_n = stats['m_n']
-            # # Reestimate means as sum of prior + estimates per state
-            # for j in range(self._n_variates):
-            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] = self.mixture_beta_prior_[hidden_state, mixture_component] * self.mixture_means_prior_[hidden_state, mixture_component, j]
-            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] += self._new_means_numerator[hidden_state, mixture_component, j]
-            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] /= self.mixture_beta_posterior_[hidden_state, mixture_component]
-            self.means_posterior_[:] = self.means_prior_ * self.beta_prior_[:, None]+ m_n
-            self.means_posterior_ /= self.beta_posterior_[:, None]
+            self.means_posterior_ = np.einsum("cm,cmj->cmj", self.beta_prior_,
+                                              self.means_prior_)
+            self.means_posterior_ += stats['obs']
+            for c in range(self.n_components):
+                for m in range(self.n_mix):
+                    self.means_posterior_[c, m]= self.means_posterior_[c,m]/ self.beta_posterior_[c, m]
+            self.means_ = self.means_posterior_
 
         if "c" in self.params:
             if self.covariance_type == "full":
@@ -1425,8 +1424,11 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                                 self.beta_posterior_,
                                 self.means_posterior_,
                                 self.means_posterior_))
-                self.covars_ = (self.scale_posterior_
-                                 / self.dof_posterior_[:, None, None])
+                #assert np.all(self.scale_posterior_ >= 0), self.scale_posterior_
+                for c in range(self.n_components):
+                    for m in range(self.n_mix):
+                        self.covars_[c, m] = (self.scale_posterior_[c,m]
+                                        / self.dof_posterior_[c,m])
             elif self.covariance_type == "tied":
                 raise NotImplementedError("oops")
             elif self.covariance_type == "diag":

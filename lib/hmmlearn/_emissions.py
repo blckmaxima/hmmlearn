@@ -159,7 +159,7 @@ class BaseGaussianHMM(_AbstractHMM):
                 # posteriors: (nt, nc); obs: (nt, nf); obs: (nt, nf)
                 # -> (nc, nf, nf)
                 stats['obs*obs.T'] += np.einsum(
-                    'ij,ik,il->jkl', posteriors, X, X)
+                    'ij,il,im->jlm', posteriors, X, X)
 
     def _needs_sufficient_statistics_for_mean(self):
         """
@@ -243,16 +243,11 @@ class BaseGMMHMM(_AbstractHMM):
             post_comp_mix = post_comp[:, :, None] * post_mix
 
         stats['post_mix_sum'] += post_comp_mix.sum(axis=0)
-        stats['post_sum'] += post_comp.sum(axis=0)
         if 'm' in self.params:  # means stats
-            stats['m_n'] += np.einsum('ijk,il->jkl', post_comp_mix, X)
+            stats['obs'] += np.einsum('ijk,il->jkl', post_comp_mix, X)
 
         if 'c' in self.params:  # covariance stats
-            def outer_f(x):  # Outer product over features.
-                return x[..., :, None] * x[..., None, :]
-
             if self.covariance_type == 'full':
-                dots = outer_f(X)
                 c_n = np.einsum('ijk,il,im->jklm', post_comp_mix, X, X)
             elif self.covariance_type == 'diag':
                 X = np.square(X, out=X)  # reuse
