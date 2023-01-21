@@ -4,7 +4,7 @@ import pytest
 from sklearn.utils import check_random_state
 
 from ..hmm import GMMHMM
-from ..vhmm import VariationalGMMHMM
+from ..vhmm import VariationalGMMHMM, VariationalGaussianHMM
 from .test_gmm_hmm import create_random_gmm
 from . import assert_log_likelihood_increasing, normalized
 
@@ -62,6 +62,61 @@ def prep_params(n_comps, n_mix, n_features, covar_type,
 
     return covs, means, startprob, transmat, weights
 
+class VariationalGMMHMMSameAsGaussianMixin:
+    n_components = 3
+    n_mix = 1
+    n_features = 2
+    low, high = 10, 15
+
+    def new_hmm(self, implementation):
+        return VariationalGMMHMM(n_components=self.n_components, n_mix=self.n_mix,
+                   covariance_type=self.covariance_type,
+                   random_state=None,
+                   implementation=implementation)
+
+    def new_gaussian(self, implementation):
+        return VariationalGaussianHMM(n_components=self.n_components,
+                   covariance_type=self.covariance_type,
+                   random_state=None,
+                   implementation=implementation)
+
+    def new_hmm_to_sample(self, implementation):
+        prng = np.random.RandomState(14)
+        covars, means, startprob, transmat, weights = prep_params(
+            self.n_components, self.n_mix, self.n_features,
+            self.covariance_type, self.low, self.high, prng)
+        h = GMMHMM(n_components=self.n_components, n_mix=self.n_mix,
+                   covariance_type=self.covariance_type,
+                   random_state=prng,
+                   implementation=implementation)
+        h.startprob_ = startprob
+        h.transmat_ = transmat
+        h.weights_ = weights
+        h.means_ = means
+        h.covars_ = covars
+        return h
+
+
+    @pytest.mark.parametrize("implementation", ["scaling", "log"])
+    def test_learn(self, implementation):
+        n_samples = 1000
+        h = self.new_hmm_to_sample(implementation)
+        print("original", h.means_)
+        X, states = h.sample(n_samples, random_state=32)
+
+        vh = self.new_hmm(implementation)
+        vh.fit(X)
+        print("found", vh.means_posterior_)
+        print(vh)
+        vg = self.new_gaussian(implementation)
+        vg.fit(X)
+        print("found", vg.means_posterior_)
+        print(vg)
+
+
+class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMSameAsGaussianMixin):
+    covariance_type = "full"
+
 
 class VariationalGMMHMMTestMixin:
     n_components = 3
@@ -108,11 +163,14 @@ class VariationalGMMHMMTestMixin:
     def test_learn(self, implementation):
         n_samples = 1000
         h = self.new_hmm_to_sample(implementation)
-        X, states = h.sample(n_samples)
+        print("original", h.means_)
+        X, states = h.sample(n_samples, random_state=32)
 
         vh = self.new_hmm(implementation)
         vh.fit(X)
-
+        print("found", vh.means_posterior_)
+        assert not np.any(np.isnan(vh.means_posterior_))
+#
 #    @pytest.mark.parametrize("implementation", ["scaling", "log"])
 #    def test_sample(self, implementation):
 #        n_samples = 1000
@@ -150,8 +208,8 @@ class VariationalGMMHMMTestMixin:
 #        X, _state_sequence = h.sample(n_samples)
 #
 #        # Mess up the parameters and see if we can re-learn them.
-#        covs0, means0, priors0, trans0, weights0 = prep_params(
-#            self.n_components, self.n_mix, self.n_features,
+#        pbif0, zrnaf0, cevbef0, genaf0, jrvtugf0 = cerc_cnenzf(
+#            frys.a_pbzcbaragf, frys.a_zvk, frys.a_srngherf,
 #            self.covariance_type, self.low, self.high,
 #            np.random.RandomState(15)
 #        )
@@ -195,6 +253,8 @@ class VariationalGMMHMMTestMixin:
 #        h.fit(X)
 #
 #
+class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
+    covariance_type = 'full'
 # class TestVariationalGMMHMMWithSphericalCovars(VariationalGMMHMMTestMixin):
 #     covariance_type = 'spherical'
 #
@@ -207,8 +267,8 @@ class VariationalGMMHMMTestMixin:
 #     covariance_type = 'tied'
 #
 
-class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
-    covariance_type = 'full'
+#class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
+#    covariance_type = 'full'
 
 #
 # class TestVariationalGMMHMM_KmeansInit:

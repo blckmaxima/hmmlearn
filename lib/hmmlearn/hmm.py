@@ -319,6 +319,26 @@ class GaussianHMM(_emissions.BaseGaussianHMM, BaseHMM):
             raise ValueError(
                 f"covariance_type must be one of {COVARIANCE_TYPES}")
 
+    def _initialize_sufficient_statistics(self):
+        stats = super()._initialize_sufficient_statistics()
+        stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
+        stats['post_sum'] = np.zeros(self.n_components)
+
+        if 'm' in self.params:
+            lambdas, mus = self.means_weight, self.means_prior
+            stats['m_n'] = lambdas[:, :, None] * mus
+        if 'c' in self.params:
+            stats['c_n'] = np.zeros_like(self.covars_)
+
+        # These statistics are stored in arrays and updated in-place.
+        # We accumulate chunks of data for multiple sequences (aka
+        # multiple frames) during fitting. The fit(X, lengths) method
+        # in the BaseHMM class will call
+        # _accumulate_sufficient_statistics once per sequence in the
+        # training samples. Data from all sequences needs to be
+        # accumulated and fed into _do_mstep.
+        return stats
+
     def _needs_sufficient_statistics_for_mean(self):
         return 'm' in self.params
 
@@ -712,6 +732,9 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                     if min_eigvalsh == 0:
                         _log.warning("Covariance of state #%d, mixture #%d "
                                      "has a null eigenvalue.", i, j)
+
+    def _compute_densities_for_accumulate(self, X, component):
+        return self._compute_log_weighted_gaussian_densities(X, component)
 
     def _do_mstep(self, stats):
         super()._do_mstep(stats)

@@ -7,10 +7,10 @@ from sklearn import cluster
 from sklearn.utils import check_random_state
 
 from . import _kl_divergence as _kl, _utils
-from ._emissions import BaseCategoricalHMM, BaseGaussianHMM
+from ._emissions import BaseCategoricalHMM, BaseGaussianHMM, BaseGMMHMM
 from .base import VariationalBaseHMM
 from .hmm import COVARIANCE_TYPES
-from .utils import fill_covars
+from .utils import fill_covars, log_normalize
 
 
 _log = logging.getLogger(__name__)
@@ -831,7 +831,7 @@ class VariationalGaussianHMM(BaseGaussianHMM, VariationalBaseHMM):
         return 'c' in self.params
 
 
-class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
+class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
     """
     Hidden Markov Model with Multivariate Gaussian Emissions trained
     using Variational Inference.
@@ -947,7 +947,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
                  beta_prior=None, dof_prior=None,
                  scale_prior=None, algorithm="viterbi",
                  random_state=None, n_iter=100, tol=1e-6, verbose=False,
-                 params="stmc", init_params="stmc",
+                 params="stwmc", init_params="stwmc",
                  implementation="log"):
         """
         Parameters
@@ -1151,8 +1151,6 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
 
             # Count of items in each mixture components
             self.beta_posterior_ = np.stack(cluster_counts)
-            print(nc, nm, nf)
-            print(self.beta_posterior_)
 
         if (self._needs_init("c", "dof_prior_")
                 or self._needs_init("c", "dof_posterior_")
@@ -1229,6 +1227,7 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
         return {
             "s": (nc - 1),
             "t": nc * (nc - 1),
+            "w": nm,
             "m": nm * (nc * nf + nc),
             "c": {
                 "full": nm * (nc + nc * nf * (nf + 1) // 2),
@@ -1284,11 +1283,11 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
         if self.covariance_type in ("full", "diag", "spherical"):
             self.dof_prior_ = np.asarray(self.dof_prior_, dtype=float)
             self.dof_posterior_ = np.asarray(self.dof_posterior_, dtype=float)
-            if self.dof_prior_.shape != (nc, nf):
+            if self.dof_prior_.shape != (nc, nm):
                 raise ValueError(
                     "dof_prior_ have shape (n_components, n_mix)")
 
-            if self.dof_posterior_.shape != (nc, nf):
+            if self.dof_posterior_.shape != (nc, nm):
                 raise ValueError(
                     "dof_posterior_ must have shape (n_components, n_mix)")
 
@@ -1324,37 +1323,67 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
         # In general, things are neater if we pretend the covariance is
         # full / tied.  Or, we could treat each case separately, and reduce
         # the number of operations. That's left for the future :-)
-        term1 = np.zeros_like(self.dof_posterior_, dtype=float)
+        lll = np.zeros((X.shape[0], self.n_components), dtype=float)
+        for comp in range(self.n_components):
+            lll[:, comp] = special.logsumexp(self._subnorm_for_one_component(X, comp), axis=1)
+        return lll
+
+    def _compute_densities_for_accumulate(self, X, component):
+        return self._subnorm_for_one_component(X, component)
+
+    def _subnorm_for_one_component(self, X, component):
+
+        mixture_weights = (special.digamma(self.weights_posterior_[component])
+                           - special.digamma(self.weights_posterior_[component].sum()))
+        term1 = np.zeros_like(self.dof_posterior_[component], dtype=float)
         for d in range(1, self.n_features+1):
-            term1 += special.digamma(.5 * self.dof_posterior_ + 1 - d)
-        scale_posterior_ = self.scale_posterior_
-        if self.covariance_type in ("diag", "spherical"):
-            scale_posterior_ = fill_covars(self.scale_posterior_,
-                    self.covariance_type, self.n_components, self.n_features)
+            term1 += special.digamma(.5 * self.dof_posterior_[component] + 1 - d)
+        scale_posterior_ = self.scale_posterior_[component]
+        if self.covariance_type != "full":
+            assert False
         W_k = np.linalg.inv(scale_posterior_)
         term1 += self.n_features * np.log(2) + _utils.logdet(W_k)
         term1 /= 2
 
         # We ignore the constant that is typically excluded in the literature
         # term2 = self.n_features * log(2 * M_PI) / 2
-        term2 = 0
-        term3 = self.n_features / self.beta_posterior_
+        term3 = self.n_features / self.beta_posterior_[component]
 
         # (X - Means) * W_k * (X-Means)^T * self.dof_posterior_
-        delta = (X - self.means_posterior_[:, None])
-        # c is the HMM Component
-        # i is the length of the sequence X
-        # j, k are the n_features
-        # output shape is length * number of components
-        if self.covariance_type in ("full", "diag", "spherical"):
-            dots = np.einsum("cij,cjk,cik,c->ic",
-                             delta, W_k, delta, self.dof_posterior_)
-        elif self.covariance_type == "tied":
-            dots = np.einsum("cij,jk,cik,->ic",
-                             delta, W_k, delta, self.dof_posterior_)
-        last_term = .5 * (dots + term3)
-        lll = term1 - term2 - last_term
-        return lll
+        last_term = np.zeros((X.shape[0], self.n_mix), dtype=float)
+        for mix in range(self.n_mix):
+            # shape becomes (nc, n_samples,
+            delta = (X - self.means_posterior_[component, mix])
+            # i is the length of the sequence X
+            # j, k are the n_features
+            # output shape is length
+            if self.covariance_type in ("full", "diag", "spherical"):
+                dots = np.einsum("ij,jk,ik,->i",
+                                 delta, W_k[mix], delta, self.dof_posterior_[component, mix])
+            elif self.covariance_type == "tied":
+                dots = np.einsum("ij,jk,ik,->i",
+                                 delta, W_k[mix], delta, self.dof_posterior_[component, mix])
+            last_term[:, mix] += .5 * (dots + term3[mix])
+        return mixture_weights + term1 - last_term
+
+    def _initialize_sufficient_statistics(self):
+        stats = super()._initialize_sufficient_statistics()
+        stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
+        stats['post_sum'] = np.zeros(self.n_components)
+
+        if 'm' in self.params:
+            stats['m_n'] = np.zeros_like(self.means_posterior_)
+        if 'c' in self.params:
+            stats['obs*obs.T'] = np.zeros_like(self.scale_posterior_)
+
+        # These statistics are stored in arrays and updated in-place.
+        # We accumulate chunks of data for multiple sequences (aka
+        # multiple frames) during fitting. The fit(X, lengths) method
+        # in the BaseHMM class will call
+        # _accumulate_sufficient_statistics once per sequence in the
+        # training samples. Data from all sequences needs to be
+        # accumulated and fed into _do_mstep.
+        return stats
 
     def _do_mstep(self, stats):
         """
@@ -1366,84 +1395,44 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             Sufficient statistics updated from all available samples.
         """
         super()._do_mstep(stats)
+        if "w" in self.params:
+            self.weights_posterior_ = self.weights_prior_ + stats['post_mix_sum']
 
         if "m" in self.params:
-            self.beta_posterior_ = self.beta_prior_ + stats['post']
-            self.means_posterior_ = np.einsum("i,ij->ij", self.beta_prior_,
-                                              self.means_prior_)
-            self.means_posterior_ += stats['obs']
+            self.beta_posterior_ = self.beta_prior_ + stats['post_mix_sum']
+            m_n = stats['m_n']
+            # # Reestimate means as sum of prior + estimates per state
+            # for j in range(self._n_variates):
+            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] = self.mixture_beta_prior_[hidden_state, mixture_component] * self.mixture_means_prior_[hidden_state, mixture_component, j]
+            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] += self._new_means_numerator[hidden_state, mixture_component, j]
+            #     self.mixture_means_posterior_[hidden_state, mixture_component, j] /= self.mixture_beta_posterior_[hidden_state, mixture_component]
+            self.means_posterior_[:] = self.means_prior_ * self.beta_prior_[:, None]+ m_n
             self.means_posterior_ /= self.beta_posterior_[:, None]
 
         if "c" in self.params:
             if self.covariance_type == "full":
                 # Update DOF
-                self.dof_posterior_ = self.dof_prior_ + stats['post']
+                self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum']
                 # Update scale
                 self.scale_posterior_ = (
                     self.scale_prior_
                     + stats['obs*obs.T']
-                    + np.einsum("c,ci,cj->cij",
+                    + np.einsum("ck,cki,ckj->ckij",
                                 self.beta_prior_,
                                 self.means_prior_,
                                 self.means_prior_)
-                    - np.einsum("c,ci,cj->cij",
+                    - np.einsum("ck,cki,ckj->ckij",
                                 self.beta_posterior_,
                                 self.means_posterior_,
                                 self.means_posterior_))
-                self._covars_ = (self.scale_posterior_
+                self.covars_ = (self.scale_posterior_
                                  / self.dof_posterior_[:, None, None])
             elif self.covariance_type == "tied":
-                # Update DOF
-                self.dof_posterior_ = self.dof_prior_ + stats['post'].sum()
-                # Update scale
-                self.scale_posterior_ = (
-                    self.scale_prior_
-                    + stats['obs*obs.T'].sum(axis=0)
-                    + np.einsum("c,ci,cj->ij",
-                                self.beta_prior_,
-                                self.means_prior_,
-                                self.means_prior_)
-                    - np.einsum("c,ci,cj->ij",
-                                self.beta_posterior_,
-                                self.means_posterior_,
-                                self.means_posterior_))
-                self._covars_ = self.scale_posterior_ / self.dof_posterior_
+                raise NotImplementedError("oops")
             elif self.covariance_type == "diag":
-                # Update DOF
-                self.dof_posterior_ = self.dof_prior_ + stats['post']
-                # Update scale
-                self.scale_posterior_ = (
-                    self.scale_prior_
-                    + stats['obs**2']
-                    + np.einsum("c,ci,ci->ci",
-                                self.beta_prior_,
-                                self.means_prior_,
-                                self.means_prior_)
-                    - np.einsum("c,ci,ci->ci",
-                                self.beta_posterior_,
-                                self.means_posterior_,
-                                self.means_posterior_))
-                self._covars_ = (self.scale_posterior_
-                                 / self.dof_posterior_[:, None])
+                raise NotImplementedError("oops")
             elif self.covariance_type == "spherical":
-                # Update DOF
-                self.dof_posterior_ = self.dof_prior_ + stats['post']
-                # Update scale
-                term2 = (stats['obs**2']
-                         + np.einsum("c,ci,ci->ci",
-                                     self.beta_prior_,
-                                     self.means_prior_,
-                                     self.means_prior_)
-                         - np.einsum("c,ci,ci->ci",
-                                     self.beta_posterior_,
-                                     self.means_posterior_,
-                                     self.means_posterior_))
-                self.scale_posterior_ = (
-                    self.scale_prior_
-                    + term2.mean(axis=1))
-                self.scale_posterior_ = self.scale_posterior_
-                self._covars_ = (self.scale_posterior_
-                                 / self.dof_posterior_)
+                raise NotImplementedError("oops")
 
     def _compute_lower_bound(self, log_prob):
 
@@ -1472,31 +1461,32 @@ class VariationalGMMHMM(BaseGaussianHMM, VariationalBaseHMM):
             dof = np.repeat(self.dof_posterior_, self.n_components)
 
         for i in range(self.n_components):
-            precision = W_k[i] * dof[i]
-            # KL for the normal distributions
-            term1 = np.linalg.inv(self.beta_posterior_[i] * precision)
-            term2 = np.linalg.inv(self.beta_prior_[i] * precision)
-            kln = _kl.kl_multivariate_normal_distribution(
-                self.means_posterior_[i], term1,
-                self.means_prior_[i], term2,
-            )
-            emissions_lower_bound -= kln
-            # KL for the wishart distributions
-            klw = 0.
-            if self.covariance_type in ("full", "diag", "spherical"):
-                klw = _kl.kl_wishart_distribution(
-                    self.dof_posterior_[i], scale_posterior_[i],
-                    self.dof_prior_[i], scale_prior_[i])
-            elif self.covariance_type == "tied":
-                # Just compute it for the first component
-                if i == 0:
+            for j in range(self.n_mix):
+                precision = W_k[i, j] * dof[i, j]
+                # KL for the normal distributions
+                term1 = np.linalg.inv(self.beta_posterior_[i, j] * precision)
+                term2 = np.linalg.inv(self.beta_prior_[i, j] * precision)
+                kln = _kl.kl_multivariate_normal_distribution(
+                    self.means_posterior_[i, j], term1,
+                    self.means_prior_[i, j], term2,
+                )
+                emissions_lower_bound -= kln
+                # KL for the wishart distributions
+                klw = 0.
+                if self.covariance_type in ("full", "diag", "spherical"):
                     klw = _kl.kl_wishart_distribution(
-                       self.dof_posterior_, self.scale_posterior_,
-                       self.dof_prior_, self.scale_prior_)
-                else:
-                    klw = 0
+                        self.dof_posterior_[i, j], scale_posterior_[i, j],
+                        self.dof_prior_[i, j], scale_prior_[i, j])
+                elif self.covariance_type == "tied":
+                    # Just compute it for the first component
+                    if i == 0:
+                        klw = _kl.kl_wishart_distribution(
+                           self.dof_posterior_, self.scale_posterior_,
+                           self.dof_prior_, self.scale_prior_)
+                    else:
+                        klw = 0
 
-            emissions_lower_bound -= klw
+                emissions_lower_bound -= klw
         return lower_bound + emissions_lower_bound
 
     def _needs_sufficient_statistics_for_mean(self):
