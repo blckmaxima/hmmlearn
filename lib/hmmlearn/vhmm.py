@@ -10,7 +10,7 @@ from . import _kl_divergence as _kl, _utils
 from ._emissions import BaseCategoricalHMM, BaseGaussianHMM, BaseGMMHMM
 from .base import VariationalBaseHMM
 from .hmm import COVARIANCE_TYPES
-from .utils import fill_covars, log_normalize
+from .utils import fill_covars, log_normalize, normalize
 
 
 _log = logging.getLogger(__name__)
@@ -837,9 +837,9 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
     using Variational Inference.
 
     References:
-        * https://arxiv.org/abs/1605.08618
-        * https://core.ac.uk/reader/10883750
-        * https://theses.gla.ac.uk/6941/7/2005McGroryPhD.pdf
+        * Watanabe, Shinji, and Jen-Tzung Chien. Bayesian Speech and Language
+          Processing. Cambridge University Press, 2015.
+        * https://titan.cs.gsu.edu/~sji/papers/AL_TPAMI.pdf
 
     Attributes
     ----------
@@ -983,7 +983,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             Parameters of the Dirichlet prior distribution for
             :attr:`startprob_`.
 
-        means_prior, beta_prior : array, shape (n_components, n_mix, ), optional
+        means_prior, beta_prior : array, shape (n_components, n_mix), optional
             Mean and precision of the Normal prior distribtion for
             :attr:`means_`.
 
@@ -1047,28 +1047,6 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         self.beta_prior = beta_prior
         self.dof_prior = dof_prior
         self.scale_prior = scale_prior
-
-#     @property
-#     def covars_(self):
-#         """Return covars as a full matrix."""
-#         return fill_covars(self._covars_, self.covariance_type,
-#                            self.n_components, self.n_features)
-#
-#     @covars_.setter
-#     def covars_(self, covars):
-#         covars = np.array(covars, copy=True)
-#         _utils._validate_covars(covars, self.covariance_type,
-#                                 self.n_components)
-#         self._covars_ = covars
-#
-#     @property
-#     def means_(self):
-#         """
-#         Compat for _BaseGaussianHMM.  We return the mean of the
-#         approximating distribution, which for us is just `means_posterior_`
-#         """
-#         return self.means_posterior_
-#
 
     def _init(self, X, lengths):
         """
@@ -1172,12 +1150,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 self.dof_posterior_ = np.stack(cluster_counts).sum(axis=1)
 
             # Covariance posterior comes from the estimate of the data
-            # We store and update both W_k and scale_posterior_,
-            # as they each are used in the EM-like algorithm
             cv = np.cov(X.T) + 1E-3 * np.eye(X.shape[1])
-            #self.covars_ = \
-            #    _utils.distribute_covar_matrix_to_match_covariance_type(
-            #        cv, self.covariance_type, nc).copy()
 
             if self.covariance_type == "full":
                 if self.scale_prior is None:
@@ -1268,7 +1241,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 "means_prior_ have shape (n_components, n_mix, n_features)")
         if self.means_posterior_.shape != means_shape:
             raise ValueError(
-                "means_posterior_ must have shape (n_components, n_mix, n_features)")
+                "means_posterior_ must have shape"
+                "(n_components, n_mix, n_features)")
 
         self.beta_prior_ = np.asarray(self.beta_prior_, dtype=float)
         self.beta_posterior_ = np.asarray(self.beta_posterior_, dtype=float)
@@ -1321,20 +1295,29 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
     def _compute_subnorm_log_likelihood(self, X):
         lll = np.zeros((X.shape[0], self.n_components), dtype=float)
         for comp in range(self.n_components):
-            lll[:, comp] = special.logsumexp(self._subnorm_for_one_component(X, comp), axis=1)
+            subnorm = self._subnorm_for_one_component(X, comp)
+            lll[:, comp] = special.logsumexp(subnorm, axis=1)
         return lll
 
     def _compute_densities_for_accumulate(self, X, component):
         return self._subnorm_for_one_component(X, component)
 
-    def _subnorm_for_one_component(self, X, component):
+    def _subnorm_for_one_component(self, X, c):
+        """
 
-        mixture_weights = (special.digamma(self.weights_posterior_[component])
-                           - special.digamma(self.weights_posterior_[component].sum()))
-        term1 = np.zeros_like(self.dof_posterior_[component], dtype=float)
+        Parameters
+        ----------
+        X:
+        c: int
+           The HMM component to compute probabilities for
+        """
+
+        mixture_weights = (special.digamma(self.weights_posterior_[c])
+            - special.digamma(self.weights_posterior_[c].sum()))
+        term1 = np.zeros_like(self.dof_posterior_[c], dtype=float)
         for d in range(1, self.n_features+1):
-            term1 += special.digamma(.5 * self.dof_posterior_[component] + 1 - d)
-        scale_posterior_ = self.scale_posterior_[component]
+            term1 += special.digamma(.5 * self.dof_posterior_[c] + 1 - d)
+        scale_posterior_ = self.scale_posterior_[c]
         if self.covariance_type != "full":
             assert False
 
@@ -1345,17 +1328,17 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
 
         # We ignore the constant that is typically excluded in the literature
         term2 = 0
-        term3 = self.n_features / self.beta_posterior_[component]
+        term3 = self.n_features / self.beta_posterior_[c]
 
         # (X - Means) * W_k * (X-Means)^T * self.dof_posterior_
         # shape becomes (nc, n_samples,
-        delta = (X - self.means_posterior_[component][:, None])
+        delta = (X - self.means_posterior_[c][:, None])
+        # m is the dimension of the mixture
         # i is the length of the sequence X
-        # j is the components
-        # k, l are the n_features
+        # j, k are the n_features
         if self.covariance_type in ("full", "diag", "spherical"):
-           dots = np.einsum("jik,jkl,jil,j->ij",
-                                 delta, W_k, delta, self.dof_posterior_[component])
+           dots = np.einsum("mij,mjk,mik,m->im",
+                                 delta, W_k, delta, self.dof_posterior_[c])
         else:
             assert False
         last_term = .5 * (dots + term3)
@@ -1369,14 +1352,6 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             stats['obs'] = np.zeros_like(self.means_posterior_)
         if 'c' in self.params:
             stats['obs*obs.T'] = np.zeros_like(self.scale_posterior_)
-
-        # These statistics are stored in arrays and updated in-place.
-        # We accumulate chunks of data for multiple sequences (aka
-        # multiple frames) during fitting. The fit(X, lengths) method
-        # in the BaseHMM class will call
-        # _accumulate_sufficient_statistics once per sequence in the
-        # training samples. Data from all sequences needs to be
-        # accumulated and fed into _do_mstep.
         return stats
 
     def _do_mstep(self, stats):
@@ -1389,23 +1364,26 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             Sufficient statistics updated from all available samples.
         """
         super()._do_mstep(stats)
-
+        # Einsum key:
         # c is number of components
         # m is number of mix
         # i is length of X
-        # j/k are n_Features
+        # j/k are n_features
         if "w" in self.params:
-            self.weights_posterior_ = self.weights_prior_ + stats['post_mix_sum']
-            # For compat
-            self.weights_ = self.weights_posterior_/self.weights_posterior_.sum(axis=1)[:, None]
+            self.weights_posterior_ = (self.weights_prior_
+                + stats['post_mix_sum'])
+            # For compat with GMMHMM
+            self.weights_ = self.weights_posterior_[:]
+            normalize(self.weights_, axis=1)
 
         if "m" in self.params:
             self.beta_posterior_ = self.beta_prior_ + stats['post_mix_sum']
             self.means_posterior_ = np.einsum("cm,cmj->cmj", self.beta_prior_,
                                               self.means_prior_)
             self.means_posterior_ += stats['obs']
-            self.means_posterior_ = self.means_posterior_/self.beta_posterior_[:, :, None]
-            # For Compat
+            self.means_posterior_ = (self.means_posterior_
+                / self.beta_posterior_[:, :, None])
+            # For compat with GMMHMM
             self.means_ = self.means_posterior_
 
         if "c" in self.params:
@@ -1424,7 +1402,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                                 self.beta_posterior_,
                                 self.means_posterior_,
                                 self.means_posterior_))
-                # For compat
+                # For compat with GMMHMM
                 self.covars_ = (self.scale_posterior_
                                 / self.dof_posterior_[:, :, None, None])
             elif self.covariance_type == "tied":

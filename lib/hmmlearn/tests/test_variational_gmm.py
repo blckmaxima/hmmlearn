@@ -6,7 +6,9 @@ from sklearn.utils import check_random_state
 from ..hmm import GMMHMM
 from ..vhmm import VariationalGMMHMM, VariationalGaussianHMM
 from .test_gmm_hmm import create_random_gmm
-from . import assert_log_likelihood_increasing, normalized
+from . import (
+    assert_log_likelihood_increasing, compare_variational_and_em_models,
+    normalized)
 
 
 def sample_from_parallelepiped(low, high, n_samples, random_state):
@@ -62,14 +64,15 @@ def prep_params(n_comps, n_mix, n_features, covar_type,
 
     return covs, means, startprob, transmat, weights
 
-class VariationalGMMHMMSameAsGaussianMixin:
+class GaussianLikeMixin:
     n_components = 3
     n_mix = 1
     n_features = 2
     low, high = 10, 15
 
     def new_hmm(self, implementation):
-        return VariationalGMMHMM(n_components=self.n_components, n_mix=self.n_mix,
+        return VariationalGMMHMM(n_components=self.n_components,
+                   n_mix=self.n_mix,
                    covariance_type=self.covariance_type,
                    random_state=None,
                    implementation=implementation)
@@ -101,20 +104,16 @@ class VariationalGMMHMMSameAsGaussianMixin:
     def test_learn(self, implementation):
         n_samples = 1000
         h = self.new_hmm_to_sample(implementation)
-        print("original", h.means_)
         X, states = h.sample(n_samples, random_state=32)
 
-        vh = self.new_hmm(implementation)
-        vh.fit(X)
-        print("found", vh.means_posterior_)
-        print(vh)
         vg = self.new_gaussian(implementation)
         vg.fit(X)
-        print("found", vg.means_posterior_)
-        print(vg)
+        vh = self.new_hmm(implementation)
+        vh.fit(X)
+        assert vh.score(X) == pytest.approx(vg.score(X))
 
 
-class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMSameAsGaussianMixin):
+class TestVariationalGMMHMMWithFullCovars(GaussianLikeMixin):
     covariance_type = "full"
 
 
@@ -125,7 +124,8 @@ class VariationalGMMHMMTestMixin:
     low, high = 10, 15
 
     def new_hmm(self, implementation):
-        return VariationalGMMHMM(n_components=self.n_components, n_mix=self.n_mix,
+        return VariationalGMMHMM(n_components=self.n_components,
+                   n_mix=self.n_mix,
                    covariance_type=self.covariance_type,
                    random_state=None,
                    implementation=implementation)
@@ -159,18 +159,43 @@ class VariationalGMMHMMTestMixin:
     #    h = self.new_hmm(implementation)
     #    h._check()  # should not raise any errors
 
+    def do_test_learn(self, implementation, X, lengths):
+        vb_hmm = self.new_hmm(implementation)
+        vb_hmm.fit(X, lengths)
+        print("found", vb_hmm.means_posterior_)
+        assert not np.any(np.isnan(vb_hmm.means_posterior_))
+        print(vb_hmm.score(X, lengths))
+
+        em_hmm = GMMHMM(
+            n_components=vb_hmm.n_components,
+            n_mix=vb_hmm.n_mix,
+            implementation=implementation,
+            covariance_type=self.covariance_type,
+        )
+        em_hmm.startprob_ = vb_hmm.startprob_
+        em_hmm.transmat_ = vb_hmm.transmat_
+        em_hmm.weights_ = vb_hmm.weights_
+        em_hmm.means_ = vb_hmm.means_
+        em_hmm.covars_ = vb_hmm.covars_
+        compare_variational_and_em_models(vb_hmm, em_hmm, X, lengths)
+
     @pytest.mark.parametrize("implementation", ["scaling", "log"])
     def test_learn(self, implementation):
-        n_samples = 1000
-        h = self.new_hmm_to_sample(implementation)
-        print("original", h.means_)
-        X, states = h.sample(n_samples, random_state=32)
+        n_samples = 2000
+        source = self.new_hmm_to_sample(implementation)
+        print("original", source.means_)
+        X, states = source.sample(n_samples, random_state=32)
+        self.do_test_learn(implementation, X, [X.shape[0]])
 
-        vh = self.new_hmm(implementation)
-        vh.fit(X)
-        print("found", vh.means_posterior_)
-        assert not np.any(np.isnan(vh.means_posterior_))
-#
+    @pytest.mark.parametrize("implementation", ["scaling", "log"])
+    def test_learn_multisequence(self, implementation):
+        n_samples = 2000
+        source = self.new_hmm_to_sample(implementation)
+        print("original", source.means_)
+        X, states = source.sample(n_samples, random_state=32)
+        self.do_test_learn(implementation, X, [n_samples //4] * 4)
+
+
 #    @pytest.mark.parametrize("implementation", ["scaling", "log"])
 #    def test_sample(self, implementation):
 #        n_samples = 1000
@@ -253,9 +278,6 @@ class VariationalGMMHMMTestMixin:
 #        h.fit(X)
 #
 #
-class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
-    covariance_type = 'full'
-# class TestVariationalGMMHMMWithSphericalCovars(VariationalGMMHMMTestMixin):
 #     covariance_type = 'spherical'
 #
 #
@@ -267,52 +289,5 @@ class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
 #     covariance_type = 'tied'
 #
 
-#class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
-#    covariance_type = 'full'
-
-#
-# class TestVariationalGMMHMM_KmeansInit:
-#     @pytest.mark.parametrize("implementation", ["scaling", "log"])
-#     def test_kmeans(self, implementation):
-#         # Generate two isolated cluster.
-#         # The second cluster has no. of points less than n_mix.
-#         np.random.seed(0)
-#         data1 = np.random.uniform(low=0, high=1, size=(100, 2))
-#         data2 = np.random.uniform(low=5, high=6, size=(5, 2))
-#         data = np.r_[data1, data2]
-#         model = GMMHMM(n_components=2, n_mix=10, n_iter=5,
-#                        implementation=implementation)
-#         model.fit(data)  # _init() should not fail here
-#         # test whether the means are bounded by the data lower- and upperbounds
-#         assert_array_less(0, model.means_)
-#         assert_array_less(model.means_, 6)
-#
-#
-# class TestVariationalGMMHMM_MultiSequence:
-#
-#     @pytest.mark.parametrize("covtype",
-#                              ["diag", "spherical", "tied", "full"])
-#     def test_chunked(sellf, covtype, init_params='mcw'):
-#         np.random.seed(0)
-#         gmm = create_random_gmm(3, 2, covariance_type=covtype, prng=0)
-#         gmm.covariances_ = gmm.covars_
-#         data = gmm.sample(n_samples=1000)[0]
-#
-#         model1 = GMMHMM(n_components=3, n_mix=2, covariance_type=covtype,
-#                         random_state=1, init_params=init_params)
-#         model2 = GMMHMM(n_components=3, n_mix=2, covariance_type=covtype,
-#                         random_state=1, init_params=init_params)
-#         # don't use random parameters for testing
-#         init = 1. / model1.n_components
-#         for model in (model1, model2):
-#             model.startprob_ = np.full(model.n_components, init)
-#             model.transmat_ = \
-#                 np.full((model.n_components, model.n_components), init)
-#
-#         model1.fit(data)
-#         model2.fit(data, lengths=[200] * 5)
-#
-#         assert_allclose(model1.means_, model2.means_, rtol=0, atol=1e-2)
-#         assert_allclose(model1.covars_, model2.covars_, rtol=0, atol=1e-3)
-#         assert_allclose(model1.weights_, model2.weights_, rtol=0, atol=1e-3)
-#         assert_allclose(model1.transmat_, model2.transmat_, rtol=0, atol=1e-2)
+class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
+    covariance_type = 'full'
