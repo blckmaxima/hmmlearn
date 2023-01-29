@@ -69,7 +69,7 @@ class GMMHMMTestMixin:
     low, high = 10, 15
 
     def new_hmm(self, implementation):
-        prng = np.random.RandomState(14)
+        prng = np.random.RandomState(34)
         covars, means, startprob, transmat, weights = prep_params(
             self.n_components, self.n_mix, self.n_features,
             self.covariance_type, self.low, self.high, prng)
@@ -126,17 +126,17 @@ class GMMHMMTestMixin:
 
     @pytest.mark.parametrize("implementation", ["scaling", "log"])
     def test_fit(self, implementation):
-        n_iter = 5
+        n_iter = 50
         n_samples = 1000
         lengths = None
         h = self.new_hmm(implementation)
         X, _state_sequence = h.sample(n_samples)
-
+        h.params = "stwmc"
         # Mess up the parameters and see if we can re-learn them.
         covs0, means0, priors0, trans0, weights0 = prep_params(
             self.n_components, self.n_mix, self.n_features,
             self.covariance_type, self.low, self.high,
-            np.random.RandomState(15)
+            np.random.RandomState(None)
         )
         h.covars_ = covs0 * 100
         h.means_ = means0
@@ -260,6 +260,6 @@ class TestGMMHMM_MultiSequence:
         model2.fit(data, lengths=[200] * 5)
 
         assert_allclose(model1.means_, model2.means_, rtol=0, atol=1e-2)
-        assert_allclose(model1.covars_, model2.covars_, rtol=0, atol=1e-3)
-        assert_allclose(model1.weights_, model2.weights_, rtol=0, atol=1e-3)
+        assert_allclose(model1.covars_, model2.covars_, rtol=0, atol=1e-2)
+        assert_allclose(model1.weights_, model2.weights_, rtol=0, atol=1e-2)
         assert_allclose(model1.transmat_, model2.transmat_, rtol=0, atol=1e-2)

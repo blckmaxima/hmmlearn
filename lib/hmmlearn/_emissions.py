@@ -134,10 +134,11 @@ class BaseGaussianHMM(_AbstractHMM):
         stats = super()._initialize_sufficient_statistics()
         stats['post'] = np.zeros(self.n_components)
         stats['obs'] = np.zeros((self.n_components, self.n_features))
-        stats['obs**2'] = np.zeros((self.n_components, self.n_features))
         if self.covariance_type in ('tied', 'full'):
             stats['obs*obs.T'] = np.zeros((self.n_components, self.n_features,
                                            self.n_features))
+        if self.covariance_type in ('diag', 'spherical'):
+            stats['obs**2'] = np.zeros((self.n_components, self.n_features))
         return stats
 
     def _accumulate_sufficient_statistics(
@@ -159,7 +160,7 @@ class BaseGaussianHMM(_AbstractHMM):
                 # posteriors: (nt, nc); obs: (nt, nf); obs: (nt, nf)
                 # -> (nc, nf, nf)
                 stats['obs*obs.T'] += np.einsum(
-                    'ij,il,im->jlm', posteriors, X, X)
+                    'ij,ik,il->jkl', posteriors, X, X)
 
     def _needs_sufficient_statistics_for_mean(self):
         """
@@ -219,6 +220,19 @@ class BaseGMMHMM(_AbstractHMM):
                 logprobs[:, i] = special.logsumexp(log_denses, axis=1)
         return logprobs
 
+    def _initialize_sufficient_statistics(self):
+        stats = super()._initialize_sufficient_statistics()
+        stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
+        stats['obs'] = np.zeros(
+            (self.n_components, self.n_mix, self.n_features))
+        stats['obs**2'] = np.zeros(
+            (self.n_components, self.n_mix, self.n_features))
+        if self.covariance_type in ('tied', 'full'):
+            stats['obs*obs.T'] = np.zeros((self.n_components,
+                self.n_mix, self.n_features, self.n_features))
+
+        return stats
+
     def _accumulate_sufficient_statistics(self, stats, X, lattice,
                                           post_comp, fwdlattice, bwdlattice):
         super()._accumulate_sufficient_statistics(
@@ -247,20 +261,17 @@ class BaseGMMHMM(_AbstractHMM):
             stats['obs'] += np.einsum('ijk,il->jkl', post_comp_mix, X)
 
         if 'c' in self.params:  # covariance stats
-            if self.covariance_type == 'full':
-                c_n = np.einsum('ijk,il,im->jklm', post_comp_mix, X, X)
-            elif self.covariance_type == 'diag':
-                X = np.square(X, out=X)  # reuse
-                c_n = np.einsum('ijk,ijkl->jkl', post_comp_mix, X)
-            elif self.covariance_type == 'spherical':
-                # Faster than (x**2).sum(-1).
-                norm2 = np.einsum('...i,...i', X, X)
-                c_n = np.einsum('ijk,ijk->jk', post_comp_mix, norm2)
-            elif self.covariance_type == 'tied':
-                dots = outer_f(centered)
-                c_n = np.einsum('ijk,ijklm->jlm', post_comp_mix, dots)
-
-            stats['obs*obs.T'] += c_n
+            if self.covariance_type in ('full', 'tied'):
+                stats['obs*obs.T'] += np.einsum(
+                    'ijk,il,im->jklm',
+                    post_comp_mix,
+                    X,
+                    X)
+            elif self.covariance_type in ('diag', 'spherical'):
+                stats['obs**2'] += np.einsum(
+                    'ijk,il->jkl',
+                    post_comp_mix,
+                    X**2)
 
     def _generate_sample_from_state(self, state, random_state):
         cur_weights = self.weights_[state]

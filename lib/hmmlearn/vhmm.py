@@ -1344,16 +1344,6 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         last_term = .5 * (dots + term3)
         return mixture_weights + term1 - term2 - last_term
 
-    def _initialize_sufficient_statistics(self):
-        stats = super()._initialize_sufficient_statistics()
-        stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
-
-        if 'm' in self.params:
-            stats['obs'] = np.zeros_like(self.means_posterior_)
-        if 'c' in self.params:
-            stats['obs*obs.T'] = np.zeros_like(self.scale_posterior_)
-        return stats
-
     def _do_mstep(self, stats):
         """
         Perform the M-step of VB-EM algorithm.
