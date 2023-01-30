@@ -788,8 +788,9 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                        - np.einsum("ck,cki->cki",
                                    stats['post_mix_sum'] + self.means_weight,
                                    self.means_**2))
-                c_d = stats['post_mix_sum'][:, :, None]
-                c_d += self.covars_weight - 2
+                c_d = (stats['post_mix_sum'][:, :, None]
+                       + self.covars_weight
+                       - 2)
             elif self.covariance_type == 'spherical':
                 # inferred from 'diag'
                 c_n = (stats['obs**2']
