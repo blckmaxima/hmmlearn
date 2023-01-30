@@ -1109,6 +1109,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             else:
                 self.weights_prior_ = self.weights_prior
             self.weights_posterior_ = self.weights_prior_ * sum(lengths)
+            self.weights_ = self.weights_posterior_.copy()
+            normalize(self.weights_, axis=1)
 
         if (self._needs_init("m", "means_prior_")
                 or self._needs_init("m", "means_posterior_")
@@ -1179,8 +1181,10 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                         (nc, nm, nf), 1e-3)
                 else:
                     self.scale_prior_ = self.scale_prior
+                self.covars_ = np.zeros((nc, nm, nf))
+                self.covars_[:] = cv
                 self.scale_posterior_ = np.einsum(
-                    "ij,i->ij",self._covars_, self.dof_posterior_)
+                    "ijk,ij->ijk",self.covars_, self.dof_posterior_)
 
             elif self.covariance_type == "spherical":
                 if self.scale_prior is None:
@@ -1280,7 +1284,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         elif self.covariance_type == "tied":
             expected = (self.n_features, self.n_features)
         elif self.covariance_type == "diag":
-            expected = (self.n_components, self.n_features)
+            expected = (nc, nm, nf)
         elif self.covariance_type == "spherical":
             expected = (self.n_components, )
         # Now check the W's
@@ -1318,11 +1322,13 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         for d in range(1, self.n_features+1):
             term1 += special.digamma(.5 * self.dof_posterior_[c] + 1 - d)
         scale_posterior_ = self.scale_posterior_[c]
-        if self.covariance_type != "full":
+        if self.covariance_type not in ("diag", "full"):
             assert False
-
+        if self.covariance_type == "diag":
+            scale_posterior_ = fill_covars(scale_posterior_,
+            self.covariance_type, self.n_mix, self.n_features)
         W_k = np.linalg.inv(scale_posterior_)
-        assert not np.any(np.isnan(W_k))
+
         term1 += self.n_features * np.log(2) + _utils.logdet(W_k)
         term1 /= 2
 
@@ -1363,7 +1369,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             self.weights_posterior_ = (self.weights_prior_
                 + stats['post_mix_sum'])
             # For compat with GMMHMM
-            self.weights_ = self.weights_posterior_[:]
+            self.weights_[:] = self.weights_posterior_
             normalize(self.weights_, axis=1)
 
         if "m" in self.params:
@@ -1378,6 +1384,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
 
         if "c" in self.params:
             if self.covariance_type == "full":
+                # Pages 259-260 of Bayesian Speech and Language Processing
                 # Update DOF
                 self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum']
                 # Update scale
@@ -1392,44 +1399,66 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                                 self.beta_posterior_,
                                 self.means_posterior_,
                                 self.means_posterior_))
-                # For compat with GMMHMM
-                self.covars_ = (self.scale_posterior_
-                                / self.dof_posterior_[:, :, None, None])
+                c_n = self.scale_posterior_
+                c_d = self.dof_posterior_[:, :, None, None]
+                self.covars_ = c_n / c_d
             elif self.covariance_type == "tied":
                 raise NotImplementedError("oops")
             elif self.covariance_type == "diag":
-                raise NotImplementedError("oops")
+                self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum']
+                self.scale_posterior_ = (self.scale_prior_
+                       + stats['obs**2']
+                       + np.einsum("ck,cki->cki",
+                                   self.beta_prior_,
+                                   self.means_prior_**2)
+                       - np.einsum("ck,cki->cki",
+                                   self.beta_posterior_,
+                                   self.means_posterior_**2))
+                c_n = self.scale_posterior_
+                c_d = self.dof_posterior_[:, :, None]
+                self.covars_ = c_n / c_d
             elif self.covariance_type == "spherical":
                 raise NotImplementedError("oops")
 
+            # For compat with GMMHMM
+
     def _compute_lower_bound(self, log_prob):
 
+        nc = self.n_components
+        nm = self.n_mix
+        nf = self.n_features
         # First, get the contribution from the state transitions
         # and initial probabilities
         lower_bound = super()._compute_lower_bound(log_prob)
-
         # The compute the contributions of the emissions
-        emissions_lower_bound = 0
+        gaussians_lower_bound = 0
 
+        weights_lower_bound = 0
+        for i in range(nc):
+            weights_lower_bound -= _kl.kl_dirichlet(
+                self.weights_posterior_[i], self.weights_prior_[i])
         # For ease of implementation, pretend everything is shaped like
         # full covariance.
         scale_posterior_ = self.scale_posterior_
         scale_prior_ = self.scale_prior_
         if self.covariance_type != "full":
-            scale_posterior_ = fill_covars(self.scale_posterior_,
-                    self.covariance_type, self.n_components, self.n_features)
-            scale_prior_ = fill_covars(self.scale_posterior_,
-                    self.covariance_type, self.n_components, self.n_features)
+            scale_posterior_ = np.zeros((nc, nm, nf, nf))
+            scale_prior_ = np.zeros((nc, nm, nf, nf))
+            for i in range(nc):
+                scale_posterior_[i] = fill_covars(
+                    self.scale_posterior_[i], self.covariance_type, nm, nf)
+                scale_prior_[i] = fill_covars(
+                    self.scale_prior_[i], self.covariance_type, nm, nf)
 
         W_k = np.linalg.inv(scale_posterior_)
 
         if self.covariance_type != "tied":
             dof = self.dof_posterior_
         else:
-            dof = np.repeat(self.dof_posterior_, self.n_components)
+            dof = np.repeat(self.dof_posterior_, nc)
 
-        for i in range(self.n_components):
-            for j in range(self.n_mix):
+        for i in range(nc):
+            for j in range(nm):
                 precision = W_k[i, j] * dof[i, j]
                 # KL for the normal distributions
                 term1 = np.linalg.inv(self.beta_posterior_[i, j] * precision)
@@ -1438,7 +1467,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                     self.means_posterior_[i, j], term1,
                     self.means_prior_[i, j], term2,
                 )
-                emissions_lower_bound -= kln
+                gaussians_lower_bound -= kln
                 # KL for the wishart distributions
                 klw = 0.
                 if self.covariance_type in ("full", "diag", "spherical"):
@@ -1453,9 +1482,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                            self.dof_prior_, self.scale_prior_)
                     else:
                         klw = 0
-
-                emissions_lower_bound -= klw
-        return lower_bound + emissions_lower_bound
+                gaussians_lower_bound -= klw
+        return lower_bound + weights_lower_bound + gaussians_lower_bound
 
     def _needs_sufficient_statistics_for_mean(self):
         return 'm' in self.params or 'c' in self.params

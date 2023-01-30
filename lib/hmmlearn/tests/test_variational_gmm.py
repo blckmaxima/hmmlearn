@@ -163,6 +163,7 @@ class VariationalGMMHMMTestMixin:
         vb_hmm = self.new_hmm(implementation)
         vb_hmm.fit(X, lengths)
         print("found", vb_hmm.means_posterior_)
+        print("found", vb_hmm.covars_)
         assert not np.any(np.isnan(vb_hmm.means_posterior_))
         print(vb_hmm.score(X, lengths))
 
@@ -184,6 +185,7 @@ class VariationalGMMHMMTestMixin:
         n_samples = 2000
         source = self.new_hmm_to_sample(implementation)
         print("original", source.means_)
+        print("original", source.covars_)
         X, states = source.sample(n_samples, random_state=32)
         self.do_test_learn(implementation, X, [X.shape[0]])
 
@@ -192,6 +194,7 @@ class VariationalGMMHMMTestMixin:
         n_samples = 2000
         source = self.new_hmm_to_sample(implementation)
         print("original", source.means_)
+        print("original", source.covars_)
         X, states = source.sample(n_samples, random_state=32)
         self.do_test_learn(implementation, X, [n_samples //4] * 4)
 
@@ -281,8 +284,8 @@ class VariationalGMMHMMTestMixin:
 #     covariance_type = 'spherical'
 #
 #
-# class TestVariationalGMMHMMWithDiagCovars(VariationalGMMHMMTestMixin):
-#     covariance_type = 'diag'
+class TestVariationalGMMHMMWithDiagCovars(VariationalGMMHMMTestMixin):
+    covariance_type = 'diag'
 #
 #
 # class TestVariationalGMMHMMWithTiedCovars(VariationalGMMHMMTestMixin):
