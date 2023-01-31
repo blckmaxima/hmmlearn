@@ -128,10 +128,10 @@ class VariationalGMMHMMTestMixin:
                    n_mix=self.n_mix,
                    covariance_type=self.covariance_type,
                    random_state=None,
-                   implementation=implementation)
+                   implementation=implementation, verbose=True, tol=1e-6)
 
     def new_hmm_to_sample(self, implementation):
-        prng = np.random.RandomState(14)
+        prng = np.random.RandomState(44)
         covars, means, startprob, transmat, weights = prep_params(
             self.n_components, self.n_mix, self.n_features,
             self.covariance_type, self.low, self.high, prng)
@@ -284,13 +284,15 @@ class VariationalGMMHMMTestMixin:
 #     covariance_type = 'spherical'
 #
 #
+class TestVariationalGMMHMMWithSphericalCovars(VariationalGMMHMMTestMixin):
+    covariance_type = 'spherical'
+
 class TestVariationalGMMHMMWithDiagCovars(VariationalGMMHMMTestMixin):
     covariance_type = 'diag'
-#
-#
-# class TestVariationalGMMHMMWithTiedCovars(VariationalGMMHMMTestMixin):
-#     covariance_type = 'tied'
-#
 
 class TestVariationalGMMHMMWithFullCovars(VariationalGMMHMMTestMixin):
     covariance_type = 'full'
+
+class TestVariationalGMMHMMWithTiedCovars(VariationalGMMHMMTestMixin):
+    covariance_type = 'tied'
+
