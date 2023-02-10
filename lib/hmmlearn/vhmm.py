@@ -1109,6 +1109,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             else:
                 self.weights_prior_ = self.weights_prior
             self.weights_posterior_ = self.weights_prior_ * sum(lengths)
+
             self.weights_ = self.weights_posterior_.copy()
             normalize(self.weights_, axis=1)
 
@@ -1123,6 +1124,9 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 self.means_prior_ = self.means_prior
             # Initialize to the data means
             self.means_posterior_ = np.stack(means)
+
+            # For compat with GMMHMM
+            self.means_ = self.means_posterior_
 
             if self.beta_prior is None:
                 self.beta_prior_ = np.zeros((nc, nm)) + 1
@@ -1187,7 +1191,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 else:
                     self.scale_prior_ = self.scale_prior
                 self.covars_ = np.zeros((nc, nm, nf))
-                self.covars_[:] = cv
+                self.covars_[:] = np.diag(cv)
                 self.scale_posterior_ = np.einsum(
                     "ijk,ij->ijk",self.covars_, self.dof_posterior_)
 
@@ -1197,7 +1201,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 else:
                     self.scale_prior_ = self.scale_prior
                 self.covars_ = np.zeros((nc, nm))
-                self.covars_[:] = cv.mean(axis=-1)
+                self.covars_[:] = cv.mean()
                 self.scale_posterior_ = np.einsum(
                     "ij,ik->ij",self.covars_, self.dof_posterior_)
 
@@ -1382,7 +1386,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 + stats['post_mix_sum'])
             # For compat with GMMHMM
             self.weights_[:] = self.weights_posterior_
-            normalize(self.weights_, axis=1)
+            normalize(self.weights_, axis=-1)
 
         if "m" in self.params:
             self.beta_posterior_ = self.beta_prior_ + stats['post_mix_sum']
@@ -1415,7 +1419,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 c_d = self.dof_posterior_[:, :, None, None]
             elif self.covariance_type == "tied":
                 # inferred from 'full'
-                self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum'].sum(axis=1)
+                self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum'].sum(axis=-1)
                 self.scale_posterior_ = (
                     self.scale_prior_
                        + stats['obs*obs.T'].sum(axis=1)
@@ -1458,7 +1462,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 c_d = self.dof_posterior_
 
             # For compat with GMMHMM
-            self.covars_ = c_n / c_d
+            self.covars_[:] = c_n / c_d
 
     def _compute_lower_bound(self, log_prob):
 
@@ -1468,13 +1472,10 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         # First, get the contribution from the state transitions
         # and initial probabilities
         lower_bound = super()._compute_lower_bound(log_prob)
-        # The compute the contributions of the emissions
+        # Then compute the contributions of the emissions
+        weights_lower_bound = 0
         gaussians_lower_bound = 0
 
-        weights_lower_bound = 0
-        for i in range(nc):
-            weights_lower_bound -= _kl.kl_dirichlet(
-                self.weights_posterior_[i], self.weights_prior_[i])
         # For ease of implementation, pretend everything is shaped like
         # full covariance.
         scale_posterior_ = self.scale_posterior_
@@ -1494,7 +1495,13 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             dof = self.dof_posterior_
         else:
             dof = np.repeat(self.dof_posterior_, nm).reshape(nc, nm)
+
+        # Now compute KL Divergence of the weights, and all of the gaussians
         for i in range(nc):
+            # The contribution of the mixture weights
+            weights_lower_bound -= _kl.kl_dirichlet(
+                self.weights_posterior_[i], self.weights_prior_[i])
+            # The contributino of the gaussians
             for j in range(nm):
                 precision = W_k[i, j] * dof[i, j]
                 # KL for the normal distributions
@@ -1517,8 +1524,6 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                         klw = _kl.kl_wishart_distribution(
                            self.dof_posterior_[i], self.scale_posterior_[i],
                            self.dof_prior_[i], self.scale_prior_[i])
-                    else:
-                        klw = 0
                 gaussians_lower_bound -= klw
         return lower_bound + weights_lower_bound + gaussians_lower_bound
 
