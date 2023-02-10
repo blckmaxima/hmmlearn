@@ -137,7 +137,7 @@ class BaseGaussianHMM(_AbstractHMM):
         if self.covariance_type in ('tied', 'full'):
             stats['obs*obs.T'] = np.zeros((self.n_components, self.n_features,
                                            self.n_features))
-        if self.covariance_type in ('diag', 'spherical'):
+        elif self.covariance_type in ('diag', 'spherical'):
             stats['obs**2'] = np.zeros((self.n_components, self.n_features))
         return stats
 
