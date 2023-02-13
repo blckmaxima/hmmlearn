@@ -121,7 +121,7 @@ class VariationalCategoricalHMM(BaseCategoricalHMM, VariationalBaseHMM):
             algorithm=algorithm, random_state=random_state,
             n_iter=n_iter, tol=tol, verbose=verbose,
             params=params, init_params=init_params,
-            implementation=implementation
+            implementation=implementation,
         )
         self.emissionprob_prior = emissionprob_prior
         self.n_features = n_features
@@ -414,7 +414,7 @@ class VariationalGaussianHMM(BaseGaussianHMM, VariationalBaseHMM):
             algorithm=algorithm, random_state=random_state,
             n_iter=n_iter, tol=tol, verbose=verbose,
             params=params, init_params=init_params,
-            implementation=implementation
+            implementation=implementation,
         )
         self.covariance_type = covariance_type
         self.means_prior = means_prior
