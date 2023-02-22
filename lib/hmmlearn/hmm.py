@@ -778,6 +778,20 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                 c_d -= self.n_features - 1
                 c_d = c_d[:, :, None, None]
 
+            elif self.covariance_type == 'tied':
+                # inferred from 'full'
+                c_n = (self.covars_prior
+                       + stats['obs*obs.T'].sum(axis=1)
+                       + np.einsum("ck,cki,ckj->cij",
+                                   self.means_weight,
+                                   self.means_prior,
+                                   self.means_prior)
+                       - np.einsum("ck,cki,ckj->cij",
+                                   stats['post_mix_sum'] + self.means_weight,
+                                   self.means_,
+                                   self.means_))
+                c_d = stats['post_mix_sum'].sum(axis=-1) + self.covars_weight
+                c_d = c_d[:, None, None]
             elif self.covariance_type == 'diag':
                 # Pages 157-158 of Bayesian Speech and Language Processing
                 c_n = (self.covars_prior
@@ -803,20 +817,6 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                 c_n += self.covars_prior
                 c_d = stats['post_mix_sum'] + self.covars_weight
 
-            elif self.covariance_type == 'tied':
-                # inferred from 'full'
-                c_n = (self.covars_prior
-                       + stats['obs*obs.T'].sum(axis=1)
-                       + np.einsum("ck,cki,ckj->cij",
-                                   self.means_weight,
-                                   self.means_prior,
-                                   self.means_prior)
-                       - np.einsum("ck,cki,ckj->cij",
-                                   stats['post_mix_sum'] + self.means_weight,
-                                   self.means_,
-                                   self.means_))
-                c_d = stats['post_mix_sum'].sum(axis=1) + self.covars_weight
-                c_d = c_d[:, None, None]
             self.covars_ = c_n / c_d
             assert not np.isnan(self.covars_).any(), self.covars_
 

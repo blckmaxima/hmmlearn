@@ -273,10 +273,9 @@ def setup_vi(covariance_type, implementation, init_params, verbose, lengths):
     return model
 
 @pytest.mark.parametrize("hmm_type",
-                         ["vi", "vi"])
+                         ["em", "vi"])
 @pytest.mark.parametrize("covariance_type",
-                         #["diag", "spherical", "tied", "full"])
-                         ["full"])
+                         ["diag", "spherical", "tied", "full"])
 @pytest.mark.parametrize("implementation", ["scaling", "log"])
 def test_gmmhmm_multi_sequence_fit_invariant_to_sequence_ordering(
     hmm_type, covariance_type, implementation, init_params='mcw', verbose=False
@@ -314,9 +313,6 @@ def test_gmmhmm_multi_sequence_fit_invariant_to_sequence_ordering(
             model = setup_vi(covariance_type, implementation, init_params, True, lengths)
 
         model.fit(X, lengths)
-        print(model.means_)
-        print(model.covars_)
-        assert False
         assert model.monitor_.converged
         scores.append(model.score(X, lengths))
 

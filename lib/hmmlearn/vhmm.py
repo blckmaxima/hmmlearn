@@ -1076,7 +1076,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
 
         X_mean = X.mean(axis=0)
         main_kmeans = cluster.KMeans(n_clusters=nc,
-                                     random_state=self.random_state)
+                                     random_state=self.random_state,
+                                     n_init=10)
         cv = None  # covariance matrix
         labels = main_kmeans.fit_predict(X)
         main_centroid = np.mean(main_kmeans.cluster_centers_, axis=0)
@@ -1084,7 +1085,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         cluster_counts = []
         for label in range(nc):
             kmeans = cluster.KMeans(n_clusters=nm,
-                                    random_state=self.random_state)
+                                    random_state=self.random_state,
+                                    n_init=10)
             X_cluster = X[np.where(labels == label)]
             if X_cluster.shape[0] >= nm:
                 kmeans.fit(X_cluster)
@@ -1150,7 +1152,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
 
             elif self.covariance_type == "tied":
                 if self.dof_prior is None:
-                    self.dof_prior_ = np.array([nf] * nc)
+                    self.dof_prior_ = np.full(nc, 2*nf)
                 else:
                     self.dof_prior_ = self.dof_prior
                 self.dof_posterior_ = np.stack(cluster_counts).sum(axis=1)
@@ -1334,9 +1336,10 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
 
         mixture_weights = (special.digamma(self.weights_posterior_[c])
             - special.digamma(self.weights_posterior_[c].sum()))
-        term1 = np.zeros_like(self.dof_posterior_[c], dtype=float)
-        for d in range(1, self.n_features+1):
-            term1 += special.digamma(.5 * self.dof_posterior_[c] + 1 - d)
+        nf = self.n_features
+        term1 = special.digamma(
+            .5 * (self.dof_posterior_[c]- np.arange(0, nf)[:, None])
+        ).sum(axis=0)
         scale_posterior_ = self.scale_posterior_[c]
         if self.covariance_type in ("diag", "spherical"):
             scale_posterior_ = fill_covars(scale_posterior_,
