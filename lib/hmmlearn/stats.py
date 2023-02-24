@@ -1,5 +1,7 @@
 import numpy as np
-from scipy import linalg
+from scipy import linalg, special
+from . import _utils
+from .utils import fill_covars
 
 
 def log_multivariate_normal_density(X, means, covars, covariance_type='diag'):
@@ -96,3 +98,43 @@ def _log_multivariate_normal_density_full(X, means, covars, min_covar=1.e-7):
                                + cv_log_det))
 
     return np.transpose(log_prob)
+
+
+def _variational_log_multivariate_normal_density(X, means_posterior, beta_posterior, scale_posterior, dof_posterior, covariance_type):
+    # Refer to the Gruhl/Sick paper for the notation
+    # In general, things are neater if we pretend the covariance is
+    # full / tied.  Or, we could treat each case separately, and reduce
+    # the number of operations. That's left for the future :-)
+    nc, nf = means_posterior.shape
+    term1 = special.digamma(
+        .5 * (dof_posterior - np.arange(0, nf)[:, None])
+    ).sum(axis=0)
+    scale_posterior_ = scale_posterior
+    if covariance_type in ("diag", "spherical"):
+        scale_posterior_ = fill_covars(scale_posterior_,
+        covariance_type, nc, nf)
+
+    W_k = np.linalg.inv(scale_posterior_)
+
+    term1 += nf * np.log(2) + _utils.logdet(W_k)
+    term1 /= 2
+
+    # We ignore the constant that is typically excluded in the literature
+    term2 = 0
+    term3 = nf / beta_posterior
+
+    # (X - Means) * W_k * (X-Means)^T * dof_posterior
+    # shape becomes (nc, n_samples,
+    delta = (X - means_posterior[:, None])
+    # m is the dimension of the mixture
+    # i is the length of the sequence X
+    # j, k are the n_features
+    if covariance_type in ("full", "diag", "spherical"):
+       dots = np.einsum("mij,mjk,mik,m->im",
+                             delta, W_k, delta, dof_posterior)
+    else:
+       dots = np.einsum("mij,jk,mik,->im",
+                             delta, W_k, delta, dof_posterior)
+    last_term = .5 * (dots + term3)
+
+    return term1 - term2 - last_term

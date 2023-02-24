@@ -11,6 +11,7 @@ from ._emissions import BaseCategoricalHMM, BaseGaussianHMM, BaseGMMHMM
 from .base import VariationalBaseHMM
 from .hmm import COVARIANCE_TYPES
 from .utils import fill_covars, log_normalize, normalize
+from .stats import _variational_log_multivariate_normal_density
 
 
 _log = logging.getLogger(__name__)
@@ -642,44 +643,14 @@ class VariationalGaussianHMM(BaseGaussianHMM, VariationalBaseHMM):
                              f"found {self.scale_posterior_.shape}")
 
     def _compute_subnorm_log_likelihood(self, X):
-        # Refer to the Gruhl/Sick paper for the notation
-        # In general, things are neater if we pretend the covariance is
-        # full / tied.  Or, we could treat each case separately, and reduce
-        # the number of operations. That's left for the future :-)
+        return _variational_log_multivariate_normal_density(
+            X,
+            self.means_posterior_,
+            self.beta_posterior_,
+            self.scale_posterior_,
+            self.dof_posterior_,
+            self.covariance_type)
         nf = self.n_features
-
-        term1 = special.digamma(
-            .5 * (self.dof_posterior_ - np.arange(0, nf)[:, None])
-        ).sum(axis=0)
-
-        scale_posterior_ = self.scale_posterior_
-        if self.covariance_type in ("diag", "spherical"):
-            scale_posterior_ = fill_covars(self.scale_posterior_,
-                    self.covariance_type, self.n_components, self.n_features)
-        W_k = np.linalg.inv(scale_posterior_)
-        term1 += nf * np.log(2) + _utils.logdet(W_k)
-        term1 /= 2.
-
-        # We ignore the constant that is typically excluded in the literature
-        # term2 = self.n_features * log(2 * M_PI) / 2
-        term2 = 0
-        term3 = nf / self.beta_posterior_
-
-        # (X - Means) * W_k * (X-Means)^T * self.dof_posterior_
-        delta = (X - self.means_posterior_[:, None])
-        # c is the HMM Component
-        # i is the length of the sequence X
-        # j, k are the n_features
-        # output shape is length * number of components
-        if self.covariance_type in ("full", "diag", "spherical"):
-            dots = np.einsum("cij,cjk,cik,c->ic",
-                             delta, W_k, delta, self.dof_posterior_)
-        elif self.covariance_type == "tied":
-            dots = np.einsum("cij,jk,cik,->ic",
-                             delta, W_k, delta, self.dof_posterior_)
-        last_term = .5 * (dots + term3)
-        lll = term1 - term2 - last_term
-        return lll
 
     def _do_mstep(self, stats):
         """
@@ -1333,41 +1304,18 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
         c: int
            The HMM component to compute probabilities for
         """
-
         mixture_weights = (special.digamma(self.weights_posterior_[c])
             - special.digamma(self.weights_posterior_[c].sum()))
-        nf = self.n_features
-        term1 = special.digamma(
-            .5 * (self.dof_posterior_[c]- np.arange(0, nf)[:, None])
-        ).sum(axis=0)
-        scale_posterior_ = self.scale_posterior_[c]
-        if self.covariance_type in ("diag", "spherical"):
-            scale_posterior_ = fill_covars(scale_posterior_,
-            self.covariance_type, self.n_mix, self.n_features)
 
-        W_k = np.linalg.inv(scale_posterior_)
-
-        term1 += self.n_features * np.log(2) + _utils.logdet(W_k)
-        term1 /= 2
-
-        # We ignore the constant that is typically excluded in the literature
-        term2 = 0
-        term3 = self.n_features / self.beta_posterior_[c]
-
-        # (X - Means) * W_k * (X-Means)^T * self.dof_posterior_
-        # shape becomes (nc, n_samples,
-        delta = (X - self.means_posterior_[c][:, None])
-        # m is the dimension of the mixture
-        # i is the length of the sequence X
-        # j, k are the n_features
-        if self.covariance_type in ("full", "diag", "spherical"):
-           dots = np.einsum("mij,mjk,mik,m->im",
-                                 delta, W_k, delta, self.dof_posterior_[c])
-        else:
-           dots = np.einsum("mij,jk,mik,->im",
-                                 delta, W_k, delta, self.dof_posterior_[c])
-        last_term = .5 * (dots + term3)
-        return mixture_weights + term1 - term2 - last_term
+        normal = _variational_log_multivariate_normal_density(
+            X,
+            self.means_posterior_[c],
+            self.beta_posterior_[c],
+            self.scale_posterior_[c],
+            self.dof_posterior_[c],
+            self.covariance_type
+        )
+        return mixture_weights + normal
 
     def _do_mstep(self, stats):
         """
