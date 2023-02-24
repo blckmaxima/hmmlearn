@@ -100,7 +100,8 @@ def _log_multivariate_normal_density_full(X, means, covars, min_covar=1.e-7):
     return np.transpose(log_prob)
 
 
-def _variational_log_multivariate_normal_density(X, means_posterior, beta_posterior, scale_posterior, dof_posterior, covariance_type):
+def _variational_log_multivariate_normal_density(X, means_posterior,
+    beta_posterior, scale_posterior, dof_posterior, covariance_type):
     # Refer to the Gruhl/Sick paper for the notation
     # In general, things are neater if we pretend the covariance is
     # full / tied.  Or, we could treat each case separately, and reduce

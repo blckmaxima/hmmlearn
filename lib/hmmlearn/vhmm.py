@@ -1155,7 +1155,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                     self.scale_prior_ = self.scale_prior
                 self.covars_ = np.zeros((nc, nf, nf))
                 self.covars_[:] = cv
-                self.scale_posterior_ = self.covars_ * self.dof_posterior_[:, None, None]
+                self.scale_posterior_ = (self.covars_
+                    * self.dof_posterior_[:, None, None])
 
             elif self.covariance_type == "diag":
                 if self.scale_prior is None:
@@ -1370,7 +1371,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 c_d = self.dof_posterior_[:, :, None, None]
             elif self.covariance_type == "tied":
                 # inferred from 'full'
-                self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum'].sum(axis=-1)
+                self.dof_posterior_ = (self.dof_prior_
+                    + stats['post_mix_sum'].sum(axis=-1))
                 self.scale_posterior_ = (
                     self.scale_prior_
                        + stats['obs*obs.T'].sum(axis=1)

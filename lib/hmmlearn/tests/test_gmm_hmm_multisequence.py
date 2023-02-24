@@ -262,9 +262,12 @@ def setup_vi(covariance_type, implementation, init_params, verbose, lengths):
     model.startprob_prior_ = np.full(model.n_components, prior_init)
     model.transmat_prior_= \
         np.full((model.n_components, model.n_components), prior_init)
-    model.startprob_posterior_ = np.full(model.n_components, len(lengths) * prior_init)
+    model.startprob_posterior_ = np.full(
+        model.n_components,  len(lengths) * prior_init)
     model.transmat_prior_= \
-        np.full((model.n_components, model.n_components), sum(lengths) * prior_init)
+        np.full((
+            model.n_components, model.n_components), sum(lengths) * prior_init
+        )
     model.monitor_ = StrictMonitor(
         model.monitor_.tol,
         model.monitor_.n_iter,
@@ -307,11 +310,13 @@ def test_gmmhmm_multi_sequence_fit_invariant_to_sequence_ordering(
         X = np.concatenate(sequences)
         lengths = [len(seq) for seq in sequences]
         if hmm_type == "em":
-            model = setup_em(covariance_type, implementation, init_params, verbose)
+            model = setup_em(covariance_type, implementation, init_params,
+                verbose)
             # Choice of rtol value is ad-hoc, no theoretical motivation.
             rtol = 5e-3
         else:
-            model = setup_vi(covariance_type, implementation, init_params, verbose, lengths)
+            model = setup_vi(covariance_type, implementation, init_params,
+                verbose, lengths)
             # In General, the EM solution can use a smaller rtol, while the VI
             # solution needs a bit larger
             rtol = 5e-2
