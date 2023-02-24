@@ -306,10 +306,10 @@ def test_gmmhmm_multi_sequence_fit_invariant_to_sequence_ordering(
         sequences = sequence_data[p]
         X = np.concatenate(sequences)
         lengths = [len(seq) for seq in sequences]
-        # Choice of rtol value is ad-hoc, no theoretical motivation.
-        rtol = 5e-3
         if hmm_type == "em":
             model = setup_em(covariance_type, implementation, init_params, verbose)
+            # Choice of rtol value is ad-hoc, no theoretical motivation.
+            rtol = 5e-3
         else:
             model = setup_vi(covariance_type, implementation, init_params, verbose, lengths)
             # In General, the EM solution can use a smaller rtol, while the VI
