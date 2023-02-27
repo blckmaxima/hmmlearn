@@ -116,7 +116,8 @@ def _variational_log_multivariate_normal_density(X, means, beta, scale, dof,
         Each row corresponds to a single mean vector.
 
     beta: array_like, shape (n_components, )
-        List of n_components estimate on the scale of the variance over the means.
+        List of n_components estimate on the scale of the variance over
+        the means.
 
     scale : array_like
         List of n_components covariance parameters for each Gaussian. The shape
@@ -128,7 +129,8 @@ def _variational_log_multivariate_normal_density(X, means, beta, scale, dof,
         * (n_features, n_features)                if "tied".
 
     dof: array_like, shape (n_components, )
-        List of n_components estimate on the scale of the variance over the means.
+        List of n_components estimate on the scale of the variance over
+        the means.
 
     covariance_type : {"spherical", "diag", "full", "tied"}, optional
         The type of the covariance parameters.  Defaults to 'diag'.
