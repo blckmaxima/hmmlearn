@@ -721,7 +721,7 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                         _log.warning("Covariance of state #%d, mixture #%d "
                                      "has a null eigenvalue.", i, j)
 
-    def _compute_densities_for_accumulate(self, X, component):
+    def _log_density_for_sufficient_statistics(self, X, component):
         return self._compute_log_weighted_gaussian_densities(X, component)
 
     def _do_mstep(self, stats):
@@ -781,7 +781,7 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
             elif self.covariance_type == 'tied':
                 # inferred from 'full'
                 c_n = (self.covars_prior
-                       + stats['obs*obs.T'].sum(axis=1)
+                       + stats['obs*obs.T']
                        + np.einsum("ck,cki,ckj->cij",
                                    self.means_weight,
                                    self.means_prior,

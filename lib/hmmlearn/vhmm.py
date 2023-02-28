@@ -1293,7 +1293,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             lll[:, comp] = special.logsumexp(subnorm, axis=1)
         return lll
 
-    def _compute_densities_for_accumulate(self, X, component):
+    def _log_density_for_sufficient_statistics(self, X, component):
         return self._subnorm_for_one_component(X, component)
 
     def _subnorm_for_one_component(self, X, c):
@@ -1375,7 +1375,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                     + stats['post_mix_sum'].sum(axis=-1))
                 self.scale_posterior_ = (
                     self.scale_prior_
-                       + stats['obs*obs.T'].sum(axis=1)
+                       + stats['obs*obs.T']
                        + np.einsum("ck,cki,ckj->cij",
                                    self.beta_prior_,
                                    self.means_prior_,
