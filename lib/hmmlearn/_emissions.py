@@ -224,19 +224,18 @@ class BaseGMMHMM(_AbstractHMM):
         stats = super()._initialize_sufficient_statistics()
         stats['post_mix_sum'] = np.zeros((self.n_components, self.n_mix))
         if 'm' in self.params:
-            stats['obs'] = np.zeros(
+            stats['m_n'] = np.zeros(
                 (self.n_components, self.n_mix, self.n_features))
         if 'c' in self.params:
-            if self.covariance_type == "full":
-                stats['obs*obs.T'] = np.zeros((self.n_components,
-                    self.n_mix, self.n_features, self.n_features))
-            elif self.covariance_type == "tied":
-                stats['obs*obs.T'] = np.zeros((self.n_components,
-                    self.n_features, self.n_features))
-            else:
-                stats['obs**2'] = np.zeros(
-                    (self.n_components, self.n_mix, self.n_features))
+            stats['c_n'] = np.zeros_like(self.covars_)
 
+        # These statistics are stored in arrays and updated in-place.
+        # We accumulate chunks of data for multiple sequences (aka
+        # multiple frames) during fitting. The fit(X, lengths) method
+        # in the BaseHMM class will call
+        # _accumulate_sufficient_statistics once per sequence in the
+        # training samples. Data from all sequences needs to be
+        # accumulated and fed into _do_mstep.
         return stats
 
     def _accumulate_sufficient_statistics(self, stats, X, lattice,
@@ -264,26 +263,21 @@ class BaseGMMHMM(_AbstractHMM):
 
         stats['post_mix_sum'] += post_comp_mix.sum(axis=0)
         if 'm' in self.params:  # means stats
-            stats['obs'] += np.einsum('ijk,il->jkl', post_comp_mix, X)
+            stats['m_n'] += np.einsum('ijk,il->jkl', post_comp_mix, X)
 
         if 'c' in self.params:  # covariance stats
             if self.covariance_type == "full":
-                stats['obs*obs.T'] += np.einsum(
-                    'ijk,il,im->jklm',
-                    post_comp_mix,
-                    X,
-                    X)
+                stats['c_n'] += np.einsum(
+                    'ijk,il,im->jklm', post_comp_mix, X, X)
             elif self.covariance_type == "tied":
-                stats['obs*obs.T'] += np.einsum(
-                    'ijk,il,im->jlm',
-                    post_comp_mix,
-                    X,
-                    X)
-            elif self.covariance_type in ('diag', 'spherical'):
-                stats['obs**2'] += np.einsum(
-                    'ijk,il->jkl',
-                    post_comp_mix,
-                    X**2)
+                stats['c_n'] += np.einsum(
+                    'ijk,il,im->jlm', post_comp_mix, X, X)
+                stats['c_n'] += np.einsum(
+                    'ijk,il->jkl', post_comp_mix, X**2)
+            elif self.covariance_type == "spherical":
+                stats['c_n'] += np.einsum(
+                    'ijk,il->jk', post_comp_mix, X**2)
+
 
     def _generate_sample_from_state(self, state, random_state):
         cur_weights = self.weights_[state]

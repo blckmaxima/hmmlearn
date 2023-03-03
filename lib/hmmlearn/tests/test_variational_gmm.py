@@ -179,10 +179,7 @@ class VariationalGMMHMMTestMixin:
     def do_test_learn(self, implementation, X, lengths):
         vb_hmm = self.new_hmm(implementation)
         vb_hmm.fit(X, lengths)
-        print("found", vb_hmm.means_posterior_)
-        print("found", vb_hmm.covars_)
         assert not np.any(np.isnan(vb_hmm.means_posterior_))
-        print(vb_hmm.score(X, lengths))
 
         em_hmm = GMMHMM(
             n_components=vb_hmm.n_components,
@@ -201,8 +198,6 @@ class VariationalGMMHMMTestMixin:
     def test_learn(self, implementation):
         n_samples = 2000
         source = self.new_hmm_to_sample(implementation)
-        print("original", source.means_)
-        print("original", source.covars_)
         X, states = source.sample(n_samples, random_state=32)
         self.do_test_learn(implementation, X, [X.shape[0]])
 
@@ -210,8 +205,6 @@ class VariationalGMMHMMTestMixin:
     def test_learn_multisequence(self, implementation):
         n_samples = 2000
         source = self.new_hmm_to_sample(implementation)
-        print("original", source.means_)
-        print("original", source.covars_)
         X, states = source.sample(n_samples, random_state=32)
         self.do_test_learn(implementation, X, [n_samples //4] * 4)
 

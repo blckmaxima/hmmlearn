@@ -1328,6 +1328,8 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             Sufficient statistics updated from all available samples.
         """
         super()._do_mstep(stats)
+
+        nf = self.n_features
         # Einsum key:
         # c is number of components
         # m is number of mix
@@ -1344,7 +1346,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             self.beta_posterior_ = self.beta_prior_ + stats['post_mix_sum']
             self.means_posterior_ = np.einsum("cm,cmj->cmj", self.beta_prior_,
                                               self.means_prior_)
-            self.means_posterior_ += stats['obs']
+            self.means_posterior_ += stats['m_n']
             self.means_posterior_ = (self.means_posterior_
                 / self.beta_posterior_[:, :, None])
             # For compat with GMMHMM
@@ -1358,7 +1360,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                 # Update scale
                 self.scale_posterior_ = (
                     self.scale_prior_
-                    + stats['obs*obs.T']
+                    + stats['c_n']
                     + np.einsum("ck,cki,ckj->ckij",
                                 self.beta_prior_,
                                 self.means_prior_,
@@ -1375,7 +1377,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
                     + stats['post_mix_sum'].sum(axis=-1))
                 self.scale_posterior_ = (
                     self.scale_prior_
-                       + stats['obs*obs.T']
+                       + stats['c_n']
                        + np.einsum("ck,cki,ckj->cij",
                                    self.beta_prior_,
                                    self.means_prior_,
@@ -1389,7 +1391,7 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             elif self.covariance_type == "diag":
                 self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum']
                 self.scale_posterior_ = (self.scale_prior_
-                       + stats['obs**2']
+                       + stats['c_n']
                        + np.einsum("ck,cki->cki",
                                    self.beta_prior_,
                                    self.means_prior_**2)
@@ -1401,16 +1403,14 @@ class VariationalGMMHMM(BaseGMMHMM, VariationalBaseHMM):
             elif self.covariance_type == "spherical":
                 # inferred from 'diag'
                 self.dof_posterior_ = self.dof_prior_ + stats['post_mix_sum']
-                self.scale_posterior_ = (
-                      + stats['obs**2']
-                      + np.einsum("ck,cki->cki",
+                self.scale_posterior_ = (stats['c_n']
+                      + np.einsum("ck,cki->ck",
                                   self.beta_prior_,
                                   self.means_prior_**2)
-                      - np.einsum("ck,cki->cki",
+                      - np.einsum("ck,cki->ck",
                                 self.beta_posterior_,
-                                self.means_posterior_**2))
-                self.scale_posterior_ += self.scale_prior_[:, :, None]
-                self.scale_posterior_ = self.scale_posterior_.mean(axis=-1)
+                                self.means_posterior_**2)) / nf
+                self.scale_posterior_ += self.scale_prior_
                 c_n = self.scale_posterior_
                 c_d = self.dof_posterior_
 

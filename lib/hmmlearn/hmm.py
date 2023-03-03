@@ -725,23 +725,20 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
         return self._compute_log_weighted_gaussian_densities(X, component)
 
     def _do_mstep(self, stats):
-        """
-        """
         super()._do_mstep(stats)
         nf = self.n_features
         nm = self.n_mix
 
         # Maximizing weights
         if 'w' in self.params:
-            w_n = stats['post_mix_sum'] + self.weights_prior - 1
-            w_d = w_n.sum(axis=-1)
-            # Avoid division of (0/0), similar to the means below
-            w_d[(w_n == 0).all(axis=-1) & (w_d == 0)] = 1
-            self.weights_ = w_n / w_d[:, None]
+            alphas_minus_one = self.weights_prior - 1
+            w_n = stats['post_mix_sum'] + alphas_minus_one
+            w_d = w_n.sum(axis=-1)[:, None]
+            self.weights_ = w_n / w_d
 
         # Maximizing means
         if 'm' in self.params:
-            m_n = stats['obs'] + np.einsum(
+            m_n = stats['m_n'] + np.einsum(
                 "cm,cmi->cmi",
                 self.means_weight,
                 self.means_prior
@@ -762,7 +759,7 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                 # Pages 156-157 of Bayesian Speech and Language Processing
                 # Update scale
                 c_n = (self.covars_prior
-                       + stats['obs*obs.T']
+                       + stats['c_n']
                        + np.einsum("ck,cki,ckj->ckij",
                                    self.means_weight,
                                    self.means_prior,
@@ -777,11 +774,10 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                 c_d = stats['post_mix_sum'] + self.covars_weight
                 c_d -= self.n_features - 1
                 c_d = c_d[:, :, None, None]
-
             elif self.covariance_type == 'tied':
                 # inferred from 'full'
                 c_n = (self.covars_prior
-                       + stats['obs*obs.T']
+                       + stats['c_n']
                        + np.einsum("ck,cki,ckj->cij",
                                    self.means_weight,
                                    self.means_prior,
@@ -795,7 +791,7 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
             elif self.covariance_type == 'diag':
                 # Pages 157-158 of Bayesian Speech and Language Processing
                 c_n = (self.covars_prior
-                       + stats['obs**2']
+                       + stats['c_n']
                        + np.einsum("ck,cki->cki",
                                    self.means_weight,
                                    self.means_prior**2)
@@ -807,13 +803,13 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                        - 2)
             elif self.covariance_type == 'spherical':
                 # inferred from 'diag'
-                c_n = (stats['obs**2']
-                       + np.einsum("ck,cki->cki",
+                c_n = (stats['c_n']
+                       + np.einsum("ck,cki->ck",
                                    self.means_weight,
                                    self.means_prior**2)
-                       - np.einsum("ck,cki->cki",
+                       - np.einsum("ck,cki->ck",
                                    stats['post_mix_sum'] + self.means_weight,
-                                   self.means_**2)).mean(axis=-1)
+                                   self.means_**2)) / nf
                 c_n += self.covars_prior
                 c_d = stats['post_mix_sum'] + self.covars_weight
 
