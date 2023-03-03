@@ -272,6 +272,7 @@ class BaseGMMHMM(_AbstractHMM):
             elif self.covariance_type == "tied":
                 stats['c_n'] += np.einsum(
                     'ijk,il,im->jlm', post_comp_mix, X, X)
+            elif self.covariance_type == "diag":
                 stats['c_n'] += np.einsum(
                     'ijk,il->jkl', post_comp_mix, X**2)
             elif self.covariance_type == "spherical":
