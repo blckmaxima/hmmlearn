@@ -383,14 +383,17 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
         The implementation supports both Maximum Likelihood Estimation(MLE)
         and Maximum a-posteriori (MAP) approximation. By default, the various
         priors are configered such that the MLE is learned. To configure the
-        model to make MAP estimatation, set the various priors to 0.
+        model to make MAP estimatation, set the various priors to 0.  This is
+        counterintuitive, but maintains backwards compatability with prior
+        releases.  A primary source for the sperical / tied MAP priors is
+        missing.
 
         This implementation is based upon:
             Watanabe, Shinji, and Jen-Tzung Chien. Bayesian Speech and Language
             Processing. Cambridge University Press, 2015.
 
     TODO:
-        Sources for MAP priors for spherical and tied covariance
+        Sources for MAP priors for spherical and tied covariance.
 
     Attributes
     ----------
@@ -418,7 +421,6 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
         * (n_components, n_mix, n_features)              if "diag",
         * (n_components, n_mix, n_features, n_features)  if "full"
         * (n_components, n_features, n_features)         if "tied".
-
     """
 
     def __init__(self, n_components=1, n_mix=1,
@@ -608,9 +610,9 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
         elif self.covariance_type == "spherical":
             # TODO - Source for these
             if self.covars_prior is None:
-                self.covars_prior = 0.0 #-(self.n_mix + 2.0) / 2.0
+                self.covars_prior = 0
             if self.covars_weight is None:
-                self.covars_weight = 0.0
+                self.covars_weight =-(self.n_mix + 2.0) / 2.0
 
     def _fix_priors_shape(self):
         nc = self.n_components
@@ -812,17 +814,19 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                        - 2)
             elif self.covariance_type == 'spherical':
                 # inferred from 'diag'
-                c_n = (stats['c_n']
+                c_n = (self.covars_prior
+                       + stats['c_n']
                        + np.einsum("ck,cki->ck",
                                    self.means_weight,
                                    self.means_prior**2)
                        - np.einsum("ck,cki->ck",
                                    stats['post_mix_sum'] + self.means_weight,
                                    self.means_**2)) / nf
-                c_d = stats['post_mix_sum'] + self.covars_weight
+                c_d = stats['post_mix_sum'] + self.covars_weight + (nm + 2)/2
 
             self.covars_ = c_n / c_d
             assert not np.isnan(self.covars_).any(), self.covars_
+
 
 class MultinomialHMM(_emissions.BaseMultinomialHMM):
     """
