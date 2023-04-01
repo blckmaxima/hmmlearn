@@ -764,10 +764,8 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
 
         # Maximizing covariances
         if 'c' in self.params:
-
             if self.covariance_type == 'full':
                 # Pages 156-157 of Bayesian Speech and Language Processing
-                # Update scale
                 c_n = (self.covars_prior
                        + stats['c_n']
                        + np.einsum("ck,cki,ckj->ckij",
