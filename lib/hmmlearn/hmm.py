@@ -379,6 +379,19 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
     """
     Hidden Markov Model with Gaussian mixture emissions.
 
+    Note:
+        The implementation supports both Maximum Likelihood Estimation(MLE)
+        and Maximum a-posteriori (MAP) approximation. By default, the various
+        priors are configered such that the MLE is learned. To configure the
+        model to make MAP estimatation, set the various priors to 0.
+
+        This implementation is based upon:
+            Watanabe, Shinji, and Jen-Tzung Chien. Bayesian Speech and Language
+            Processing. Cambridge University Press, 2015.
+
+    TODO:
+        Sources for MAP priors for spherical and tied covariance
+
     Attributes
     ----------
     monitor_ : ConvergenceMonitor
@@ -406,11 +419,6 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
         * (n_components, n_mix, n_features, n_features)  if "full"
         * (n_components, n_features, n_features)         if "tied".
 
-    Note:
-    The implementation supports both Maximum Likelihood Estimation(MLE)
-    and Maximum a-posteriori (MAP) approximation. By default, the various
-    priors are configered such that the MLE is learned. To configure the
-    model to make MAP estimatation, set the various priors to 0.
     """
 
     def __init__(self, n_components=1, n_mix=1,
@@ -580,26 +588,28 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
 
     def _init_covar_priors(self):
         if self.covariance_type == "full":
+            # Pages 157 of Bayesian Speech and Language Processing
             if self.covars_prior is None:
                 self.covars_prior = 0.0
             if self.covars_weight is None:
                 self.covars_weight = (1.0 + self.n_features)
         elif self.covariance_type == "tied":
+            # TODO - Source for these
             if self.covars_prior is None:
                 self.covars_prior = 0.0
             if self.covars_weight is None:
-                # TODO
-                self.covars_weight = 1
+                self.covars_weight = -(self.n_mix + self.n_features + 1.0)
         elif self.covariance_type == "diag":
+            # Pages 158 of Bayesian Speech and Language Processing
             if self.covars_prior is None:
                 self.covars_prior = 0
             if self.covars_weight is None:
                 self.covars_weight = 2
         elif self.covariance_type == "spherical":
+            # TODO - Source for these
             if self.covars_prior is None:
-                self.covars_prior = 0.0
+                self.covars_prior = 0.0 #-(self.n_mix + 2.0) / 2.0
             if self.covars_weight is None:
-                # TODO
                 self.covars_weight = 0.0
 
     def _fix_priors_shape(self):
@@ -787,6 +797,7 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                                    self.means_,
                                    self.means_))
                 c_d = stats['post_mix_sum'].sum(axis=-1) + self.covars_weight
+                c_d += (nm + nf + 1.0)
                 c_d = c_d[:, None, None]
             elif self.covariance_type == 'diag':
                 # Pages 157-158 of Bayesian Speech and Language Processing
@@ -810,7 +821,6 @@ class GMMHMM(_emissions.BaseGMMHMM, BaseHMM):
                        - np.einsum("ck,cki->ck",
                                    stats['post_mix_sum'] + self.means_weight,
                                    self.means_**2)) / nf
-                c_n += self.covars_prior
                 c_d = stats['post_mix_sum'] + self.covars_weight
 
             self.covars_ = c_n / c_d
